@@ -71,15 +71,20 @@ A zero-cost, zero-app communication bridge for pregnant women with basic feature
 | **Ecosystem** | ABDM — data contract defined; live API integration in Phase 2 | 2 |
 | **ML Risk Model** | Quantized XGBoost — shadow mode in Phase 2, on-device in Phase 3 | 2 |
 
-### External APIs
+### External APIs (API-Pivot for Hackathon Demo)
 
-| API | Base URL | Auth | Rate Limit | Phase |
-|-----|----------|------|------------|-------|
-| **NHA / ABDM** | `https://.abdm.gov.in/api/v1` | HMAC-SHA256 | 100/min | 2 |
-| **Bhashini STT/TTS** | `https://meity-auth.ulcacetech.in/api/v3` | JWT Bearer | 60/min STT | 2 |
-| **Twilio SMS/WhatsApp** | `https://api.twilio.com/2010-04-01` | Basic Auth | Varies | 1+ |
-| **XGBoost ONNX** | Local inference | None | N/A | 2 |
-| **Firebase FCM** | `https://fcm.googleapis.com/fcm/send` | FCM server key | Varies | 2 |
+> **Note:** Several external APIs are unavailable for hackathon use. Local alternatives used. Adapter pattern ensures live APIs can be swapped in when credentials arrive.
+
+| API | Status | Hackathon Alternative |
+|-----|--------|----------------------|
+| **NHA / ABDM** | ❌ Unavailable — requires healthcare provider registration | Local ABHA generator with Mod97 validation |
+| **Bhashini STT/TTS** | ❌ Access not granted | IndicTrans2 (IIT-M AI4Bharat) Docker — `http://localhost:8000` |
+| **Twilio SMS/WhatsApp** | ❌ Access problems | Telegram Bot API — free, no phone number required |
+| **XGBoost ONNX** | ✅ Available in project venv | Direct Python import — no external API |
+| **SQLite** | ✅ User preference for demo | Local `aiosqlite` — Supabase for production |
+| **MiniMax API** | ✅ `MINIMAX_API_KEY` in environment | SBAR generation via `openai.ChatCompletion` |
+
+**Adapter pattern:** All API integrations use env var flags (`USE_LIVE_ABDM`, `USE_BHASHINI`, `USE_TWILIO`). When credentials become available, set `USE_*=true` + fill credentials → no code rewrite needed.
 
 ---
 
@@ -107,10 +112,13 @@ A zero-cost, zero-app communication bridge for pregnant women with basic feature
 - Bhashini STT/TTS stubs in `constants.dart` — placeholder language codes for Kannada/Hindi
 - Voice widget scaffolded for future STT/TTS integration
 
-**Phase 2 additions (live Bhashini API):**
-- Bhashini STT for symptom input — CHW speaks in Kannada or Hindi, transcribed to structured vitals
-- Bhashini TTS for risk score and SBAR playback — CHW listens to AI-generated summary
-- Voice is primary UI; screen is secondary reveal for confirmations
+**Phase 2 additions (hackathon alternative — live API ready when credentials arrive):**
+- **IndicTrans2** (IIT-M AI4Bharat) Docker container for STT/TTS — Kannada/Hindi support, no external credentials needed
+- Local ABHA generator with Mod97 checksum validation — replaces live NHA API for demo
+- Telegram Bot API for CHW/supervisor notifications — replaces Twilio/WhatsApp
+- XGBoost shadow ML from local venv — no external ML API needed
+- SQLite demo database — portable, no Supabase account needed for demo
+- Adapter pattern throughout: `USE_LIVE_ABDM`, `USE_BHASHINI`, `USE_TWILIO` env vars swap to live APIs with no code rewrite
 - Radio call-and-response confirmation: STT transcription read back via TTS before commit
 
 ---
@@ -144,9 +152,11 @@ A zero-cost, zero-app communication bridge for pregnant women with basic feature
   6. CHW listens, opens patient record in O2 app, responds via WhatsApp voice note
 - Emergency keyword detection: EN/KN/HI keyword scanning in recorded audio
 
-**Phase 2 additions:**
-- IVR voice transcription via Bhashini STT — WhatsApp text summary sent alongside audio
-- Transcript stored as searchable clinical note in Supabase
+**Phase 2 additions (hackathon demo):**
+- IVR voice transcription via IndicTrans2 STT — Telegram text summary sent to CHW alongside audio
+- Transcript stored as searchable clinical note in SQLite
+- Telegram Bot for all CHW/supervisor notifications (replaces Twilio/WhatsApp)
+- XGBoost shadow ML for risk scoring alongside rule-based thresholds
 - WhatsApp text summary: short structured message (patient ID + chief complaint + timestamp)
 - Emergency keyword detection upgraded from audio filename scan to full STT transcript analysis
 
@@ -208,12 +218,18 @@ A zero-cost, zero-app communication bridge for pregnant women with basic feature
 
 ---
 
-## 8. Phase 2 Success Criteria
+## 8. Phase 2 Success Criteria (API-Pivoted for Hackathon Demo)
 
-1. **Pilot partner PHC operational** — ≥3 CHWs actively using the app in Karnataka
-2. **No ABDM stub** — All patient registrations verified against live NHA API
-3. **Voice pipeline live** — Bhashini STT/TTS replacing all stubs in Phase 1
-4. **Supervisor on dashboard** — PHC supervisor accessing aggregate data within 1 week of pilot start
+1. **Pilot partner PHC operational** — ≥3 CHWs actively using the app in demo mode
+2. **No ABDM stub** — All patient registrations verified against local ABHA generator with valid Mod97 checksum
+3. **Voice pipeline live** — IndicTrans2 STT/TTS replacing all Bhashini stubs in Phase 1
+4. **Supervisor on dashboard** — PHC supervisor accessing aggregate data on Flask/SQLite dashboard
+5. **Telegram alerts active** — CHW and supervisor receiving Telegram messages for HIGH-risk patients
+6. **XGBoost shadow ML running** — Both ML and rule-based scores returned in `/risk` endpoint
+7. **GPS visit logs** — Home visits automatically tagged with GPS coordinates in SQLite
+8. **Adapter ready** — `USE_LIVE_ABDM`, `USE_BHASHINI`, `USE_TWILIO` flags documented for when credentials arrive
+
+> **Note:** Criteria 2 and 3 use local/Telegram alternatives for hackathon demo. When live NHA and Bhashini credentials are available, flip env vars — criteria remain valid without code changes.
 5. **ML shadow running** — Model producing scores alongside rule-based in production
 6. **GPS compliance proof** — Visit logs with GPS coordinates accepted by NHM program officers
 

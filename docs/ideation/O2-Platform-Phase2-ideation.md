@@ -10,25 +10,35 @@
 
 **Delivered:** 6-unit MVP — Flutter CHW app, Supabase schema + RLS, FastAPI AI server, IVR backend, Voice widget, ABDM mock.
 
-**Key stubs to upgrade in Phase 2:**
-- ABDM mock → live NHA API (HPR verification, ABHA auth)
-- Bhashini stubs → live Bhashini API v3 (STT + TTS)
-- Rule-based WHO thresholds → ML risk model trained on Phase 1 data
-- No IVR transcription yet — voice messages stay as raw audio
-- No push notifications — CHWs rely on WhatsApp
-- Supabase as sync target — no real FHIR server
-
 **What's accumulating:** Historical vitals data, risk outcomes, clinical contacts, SBAR documents. This is the training signal for Phase 2 ML.
 
 ---
 
-## Topic Axes
+## ⚠️ API Constraints Update (Loop 2 — 2026-05-11)
 
-1. **Integration upgrade** — Replace stubs with live APIs (ABDM, Bhashini)
-2. **ML-based risk scoring** — Train on Phase 1 historical outcomes
-3. **Voice pipeline** — IVR transcription + searchable audio
-4. **Notification layer** — Push alerts to CHWs and supervisors
+After reviewing credential availability for Phase 2, several planned external APIs are unavailable for hackathon use:
+
+| API | Status | Alternative |
+|-----|--------|-------------|
+| **NHA/ABDM** | ❌ Unavailable — requires active healthcare provider registration | Local ABHA generator with Mod97 validation + mock ABDM sandbox |
+| **Bhashini v3** | ❌ Access not granted | IndicTrans2 (self-hosted, IIT-M AI4Bharat model) for STT/TTS |
+| **Twilio** | ❌ Posing access problems | Telegram Bot API for alerts and notifications |
+| **XGBoost** | ✅ Available in project venv | Direct Python import for shadow ML risk scoring |
+| **Supabase** | ⚠️ Use for prod, local SQLite for demo | SQLite via `aiosqlite` for standalone demo |
+| **LLM (SBAR)** | ✅ `MINIMAX_API_KEY` in environment | MiniMax API for SBAR generation |
+
+**Decision:** Build Phase 2 as a fully standalone demo with local alternatives. Code structure is designed so external APIs can be swapped in when credentials become available (env var driven, clean adapter pattern).
+
+---
+
+## Topic Axes (Updated for API Pivot)
+
+1. **Integration upgrade** — Replace stubs with local/mock alternatives (ABHA generator, IndicTrans2, Telegram)
+2. **ML-based risk scoring** — XGBoost from local venv, shadow mode
+3. **Voice pipeline** — IndicTrans2 STT/TTS self-hosted, IVR transcription
+4. **Notification layer** — Telegram Bot API for alerts to CHWs and supervisors
 5. **Pilot operations** — PHC dashboards, supervisor views, home visit GPS
+6. **Demo portability** — Standalone SQLite backend, env-var driven API adapters
 
 ---
 
@@ -36,17 +46,17 @@
 
 *What is consistently slow, broken, or annoying in Phase 1 for CHWs, supervisors, and patients?*
 
-1. **No confirmation when ABDM lookup fails** — CHW enters ABHA, app silently accepts invalid ID because Mod 97 is a stub. Patient can't be linked to national health record. Real NHA API would return actual verification status.
+1. **ABHA registration is a stub with no real verification** — CHW enters ABHA, app validates locally with Mod 97 but doesn't verify against any registry. Patient can't link to national health record without live ABDM credentials. Local ABHA generator + mock ABDM sandbox bridges this gap for the demo.
 
-2. **Bhashini STT/TTS produces gibberish in Phase 1** — The stubs in `constants.dart` return hardcoded strings. Low-literacy CHWs and patients can't test voice features, so voice UX stays unvalidated until Phase 2.
+2. **IndicTrans2 replaces Bhashini for hackathon demo** — Bhashini access isn't granted. IIT-M's IndicTrans2 (self-hosted) provides STT/TTS for Kannada and Hindi without external API credentials. Docker container runs locally.
 
-3. **CHW doesn't know when patient calls via IVR** — Missed call comes in, IVR backend records it, but CHW only gets WhatsApp if the full flow completes. No status visibility. CHW has to manually check WhatsApp.
+3. **Telegram replaces Twilio for CHW notifications** — Twilio access is problematic. Telegram Bot API sends alerts to CHW and supervisor via bot messages — no phone number required, free, and reliable.
 
-4. **Risk score is always the same for same vitals** — Rule-based thresholds are deterministic. Two different CHWs with identical patients get identical scores. No personalization, no false-positive learning.
+4. **Risk score is always the same for same vitals** — Rule-based thresholds are deterministic. XGBoost in local venv enables shadow ML mode: ML score alongside rule-based, no clinical decisions on ML alone yet.
 
-5. **No offline map for home visits** — CHW visits patients in villages without addresses. Current app has no GPS or offline map. CHW relies on memory or WhatsApp location sharing.
+5. **No GPS tag for home visits** — CHW visits patients in villages without addresses. `geolocator` package auto-tags coordinates. No offline map yet — GPS coordinate stored as proof of visit.
 
-6. **PHC supervisor has no dashboard** — Aggregate risk levels across the PHC, high-risk patient count, SBAR generation rate — none of this is visible to supervisors without manually querying Supabase.
+6. **PHC supervisor has no dashboard** — Aggregate risk levels across the PHC, high-risk patient count, SBAR generation rate — none visible to supervisors. Flask/HTML dashboard on local SQLite fills this for demo.
 
 ---
 
@@ -54,17 +64,17 @@
 
 *Invert a painful step, remove it entirely, or automate it away.*
 
-1. **Remove the Mod 97 stub entirely** — Instead of validating locally, always call NHA API. Accept the network dependency for this one operation. Abort patient registration if ABDM verification fails, not silently.
+1. **Remove the Mod 97 stub — use local ABHA generator** — Generate real ABHA numbers locally with valid Mod 97 checksum. For demo, the local generator is functionally identical to ABDM sandbox for a hackathon context. Network call to NHA only when credentials are available.
 
-2. **Automate IVR → CHW notification** — Patient voice message should auto-generate a WhatsApp text summary using STT transcription, not just forward the audio. CHW gets both text + audio.
+2. **IVR → Telegram text summary via IndicTrans2 STT** — Patient voice message auto-transcribed. IndicTrans2 STT (self-hosted, IIT-M) converts audio to text. Telegram bot sends CHW both transcript + audio link. No external API credentials needed.
 
-3. **Remove manual follow-up scheduling** — Risk level directly drives the next visit date in the app. When `/risk` returns HIGH, auto-schedule follow-up in 24h. CHW doesn't manually enter dates.
+3. **Remove manual follow-up scheduling** — Risk level directly drives the next visit date. When `/risk` returns HIGH, auto-schedule follow-up in 24h. CHW doesn't manually enter dates.
 
-4. **Invert: patient initiates care plan, not CHW** — Instead of CHW monitoring patient passively, the IVR missed-call counts become a signal. 3+ missed calls in a week = auto-flag for outreach, regardless of vitals.
+4. **Invert: patient initiates care plan, not CHW** — IVR missed-call counts become a risk signal. 3+ missed calls in a week = auto-flag for outreach, regardless of vitals. Local SQLite tracks call frequency.
 
-5. **Remove paper-based referral slips** — SBAR generated by the app is sent directly to the referral PHC via FHIR DocumentReference, not printed. Referral facility receives it digitally.
+5. **Remove paper-based referral slips** — SBAR generated by the app is sent via Telegram message to the referral PHC. No FHIR DocumentReference push (requires live ABDM). Telegram message with SBAR text serves as referral confirmation in demo.
 
-6. **Automate GPS-tagged visit logging** — When CHW opens patient record in the app, auto-log GPS coordinates as visit context. No manual entry. Exportable as proof of home visit for government programs.
+6. **Automate GPS-tagged visit logging** — `geolocator` package auto-logs coordinates when CHW opens patient record. No manual entry. Stored in local SQLite. Proof of home visit for NHM compliance.
 
 ---
 
@@ -72,17 +82,17 @@
 
 *What is being treated as fixed that is actually a choice?*
 
-1. **"FHIR server is Phase 3"** — Why wait? Start syncing to a real FHIR R4 server (e.g., Microsoft FHIR Server, HAPI FHIR) alongside Supabase. Supabase handles auth + RLS; FHIR server handles clinical data exchange with government systems. Both from day 1 of Phase 2.
+1. **"FHIR server is Phase 3"** — For demo, store FHIR bundles as JSON files in local SQLite. The Phase 1 FHIR model code (fhir.resources) stays in place so real FHIR server sync is a config change, not a rewrite. Supabase/SQLite is the swap.
 
-2. **"ML needs lakhs of data"** — Quantized Gradient Boosting (XGBoost) can train meaningfully on 500–1,000 patient-months of Phase 1 data. Start model training in Month 1 of Phase 2, not after "enough" data. Shadow mode: ML score alongside rule-based, no clinical decisions on ML alone yet.
+2. **"ML needs lakhs of data"** — XGBoost in local venv handles shadow ML with 500-1000 patient-months. `xgboost.XGBClassifier` loaded directly, no API call. MiniMax API used for SBAR generation only.
 
-3. **"Bhashini API needs government approval"** — Bhashini is a public API with self-service registration. Start integration immediately. Local language support is a key differentiator for CHW adoption — don't wait for government partnerships.
+3. **"Bhashini API needs government approval"** — IndicTrans2 (IIT-M AI4Bharat) runs as a local Docker container. No external credentials needed for STT/TTS. Kannada and Hindi support via self-hosted model.
 
-4. **"CHW needs a smartphone"** — The feature-phone patient already has no smartphone. But what if the CHW also uses feature phone? IVR-first workflow: CHW calls a number, speaks patient ID, gets risk status back via IVR. No app needed for status checks.
+4. **"CHW needs a smartphone"** — IVR-first: CHW calls a number, speaks patient ID, gets risk status via IVR. No app needed for status checks. Telegram bot also delivers alerts to feature-phone CHWs via text.
 
-5. **"Emergency alert goes to CHW only"** — Emergency protocol should simultaneously notify: CHW (WhatsApp), PHC supervisor (SMS + app push), and patient's emergency contact (SMS). Currently only CHW gets WhatsApp.
+5. **"Emergency alert goes to CHW only"** — Multi-recipient via Telegram: CHW gets alert, supervisor gets alert, emergency contact gets alert. All via Telegram bot — no SMS cost, no phone number required for supervisor.
 
-6. **"Sync is upload-first"** — Why only upload vitals to cloud? Prefetch: when CHW opens app in the morning with WiFi, sync down the day's schedule, nearby patient records, any new SBARs from referral facilities. Push model, not just pull.
+6. **"Sync is upload-first"** — Prefetch on app open: sync down day's schedule, patient records, new SBARs. Local SQLite stores everything. Supabase sync when online. For demo, local-first with manual sync trigger.
 
 ---
 
@@ -90,17 +100,17 @@
 
 *Choices that, once made, make many future moves cheaper or stronger.*
 
-1. **Standardized FHIR sync target** — Once FHIR R4 is the canonical format end-to-end, the app syncs to any FHIR-compliant system: government HIS, hospital EMR, national health records. The FHIR investment in Phase 1 pays off in Phase 2 integration.
+1. **Local SQLite is the portable demo artifact** — Demo can run on any laptop without Supabase account, internet, or API credentials. All data in local SQLite. When Supabase credentials come, flip the env var and data syncs to cloud. Adapter pattern throughout.
 
-2. **ABDM as patient identity layer** — Once live ABHA verification works, every patient is globally identifiable across India's health systems. Future: link to pregnancy registry, immunization records, hospital discharge summaries — all via ABDM.
+2. **Local ABHA generator keeps ABDM code ready** — Generate valid ABHA numbers with Mod 97 locally. The `abha_service.dart` and ABDM router code stays identical when real NHA credentials arrive — just point to live endpoint. No rewrite.
 
-3. **Historical risk data as ML training set** — Every patient visit in Phase 1 builds the training set. Outcomes (did patient deliver safely? was referral followed?) provide labels. The compounding effect: risk model accuracy improves with every week of pilot data.
+3. **XGBoost shadow ML compounds with every visit** — Local XGBoost in venv. Shadow mode: ML score alongside rule-based. As pilot data accumulates, retrain locally. No cloud ML cost. Model file is portable.
 
-4. **IVR audio archive** — Every patient voice message is stored. After STT transcription (Phase 2), these become searchable clinical notes. 6 months of audio = unstructured corpus of rural maternal health complaints, automatable to populate SNOMED-CT codes.
+4. **IVR audio archive in SQLite** — Every patient voice message stored locally. IndicTrans2 STT (Docker container) transcribes to text. Transcript stored alongside audio. Searchable. When live ABDM is available, push transcripts as FHIR DocumentReference.
 
-5. **GPS visit logs as program compliance proof** — ASHA workers are government employees with attendance requirements. GPS-tagged, timestamped visit logs serve double duty: clinical continuity + program attendance verification. Opens NHM (National Health Mission) funding conversations.
+5. **GPS visit logs as NHM compliance proof** — `geolocator` auto-tags every home visit. SQLite stores coordinates + timestamp. Export as CSV for NHM attendance reporting. No external service needed.
 
-6. **Bhashini TTS for regional language SBARs** — Once Bhashini TTS is live, SBAR documents can be played back in Kannada or Hindi, not just displayed in English. Low-literacy CHWs absorb the information faster as audio.
+6. **IndicTrans2 TTS for audio SBAR** — IndicTrans2 Docker container also does TTS. SBAR text → audio in Kannada/Hindi. Local. Free. CHW plays audio instead of reading text.
 
 ---
 
@@ -108,17 +118,17 @@
 
 *How do completely different fields solve structurally analogous problems?*
 
-1. **Waze-style incident mapping for maternal risk** — Community health workers marking high-risk zones on an offline map (villages with clustering of HIGH-risk patients) analogous to Waze's crowd-sourced hazard mapping. CHWs collectively build a risk heat map without internet connectivity.
+1. **Waze-style incident mapping for maternal risk** — CHW collective mapping of high-risk village zones. For demo: SQLite stores GPS clusters, Flask dashboard shows heat map. No offline map tile server needed — coordinates stored, heat map rendered on supervisor dashboard.
 
-2. **Airline standby list for PHC referrals** — Referral to district hospital has a waitlist. Model it like airline standby — when a slot opens, the most urgent case gets bumped up automatically. Currently manual phone calls coordinate this.
+2. **Airline standby list for PHC referrals** — Referral waitlist with urgent case bumping. Local SQLite `referral_queue` table with priority field. When bed opens at district hospital, CHW gets Telegram notification with next patient in queue.
 
-3. **Nest thermostat pattern for vital thresholds** — Smart thermostats learn household patterns and alert when deviation is sustained, not momentary. Apply to vitals: sustained BP elevation over 3 readings in 48h, not a single spike, triggers HIGH alert. Reduces false positives from white-coat hypertension.
+3. **Nest thermostat pattern for vital thresholds** — Sustained deviation over 3 readings in 48h triggers HIGH alert. Local Python rule: `if systolic_avg_last_3 > 140 and reading_gap_hours < 48: flag HIGH`. Reduces white-coat false positives. XGBoost shadow ML runs in parallel.
 
-4. **Podcast RSS feeds for SBAR distribution** — SBAR is a clinical handover document. Distribute it like a podcast: referral doctor subscribes to SBAR feed for their PHC. New SBAR auto-appears. No login, no portal, just a link and an audio version via Bhashini TTS.
+4. **Podcast RSS feeds for SBAR distribution** — Telegram channel for SBAR delivery. Supervisor subscribes to channel. New SBAR auto-posts with audio version (IndicTrans2 TTS). No portal, no login — just Telegram message.
 
-5. **WhatsApp broadcast lists for CHW supervisor updates** — CHW supervisors already use WhatsApp broadcast lists for official communication. Integrate O2 alerts into this channel. Not a new app to install, not a new habit to form. Supervisor gets a WhatsApp text with patient ID + risk + action.
+5. **Telegram broadcast for CHW supervisor updates** — Supervisors already on Telegram. O2 Telegram bot sends: patient ID, risk level, action required. Not a new app to install. CHW gets same via personal DM, supervisor gets group message.
 
-6. **Gmail's smart reply for CHW follow-up messages** — After a home visit, CHW needs to send follow-up reminder to patient. Gmail's smart reply suggests the text. O2 generates contextual follow-up messages in Kannada/Hindi using the visit notes and risk level — CHW approves and sends via WhatsApp.
+6. **Smart reply for CHW follow-up messages** — MiniMax API generates contextual follow-up message in Kannada/Hindi from visit notes. CHW reviews in Telegram bot, edits if needed, sends via WhatsApp. Reduces typing on low-end phones.
 
 ---
 
@@ -126,58 +136,58 @@
 
 *Invert the obvious constraint to its extreme.*
 
-1. **What if there is zero connectivity for 30 days?** — Chakravyuh pattern: design for 30-day offline isolation. All Phase 2 features must work without any network for 30 days. Sync queue becomes critical — it must handle 30 days of backlog without corruption or conflict.
+1. **What if connectivity is zero for 30 days?** — Chakravyuh pattern: SQLite is the offline-first store. All Phase 2 features work 30 days offline. Sync queue in SQLite queues all visits, vitals, SBARs. Conflict resolution: last-write-wins with timestamp. Demo runs entirely offline.
 
-2. **What if the CHW has only 2 hours of battery per day?** — Remove WorkManager's charging constraint. Sync on any unmetered network regardless of charging state. Trade battery life for data freshness. Also: reduce payload size (compress FHIR bundles, batch vitals).
+2. **What if CHW has only 2 hours of battery?** — Remove charging constraint. Sync on any WiFi regardless of battery state. Compress FHIR JSON bundles (gzip). Batch vitals into single payload. `geolocator` GPS saves as single coordinate pair, not continuous tracking.
 
-3. **What if the PHC has 500 patients, not 50?** — Scale test the data model. Brick repository must handle 500 patients with thousands of vitals records without degrading. Query performance in offline mode matters at scale. Pagination and lazy loading become critical.
+3. **What if PHC has 500 patients, not 50?** — Brick repository handles 500 patients. Lazy loading + pagination in Flutter. Local SQLite indexed on `patient_id`, `recorded_at`. Query performance validated with 500 patient synthetic data.
 
-4. **What if the patient has no phone at all?** — Zero-phone patient workflow: CHW marks patient as "no phone" in app. Follow-up is always in-person. Flag generates a visit reminder in CHW's schedule. Home visit becomes the only communication channel, so GPS tagging is even more critical.
+4. **What if patient has no phone at all?** — Zero-phone patient: CHW marks "no phone" in app. Follow-up always in-person. GPS tag is the only visit proof. Visit reminder generated in CHW schedule. Home visit is the only channel.
 
-5. **What if every ASHA in Karnataka (50,000) used O2 simultaneously?** — Supabase connection pooling at scale. The RLS policies work at small scale but need stress testing at 50k concurrent CHWs. Also: Twilio WhatsApp Business API rate limits. IVR flow must handle 50k simultaneous missed calls during a health camp.
+5. **What if every ASHA in Karnataka (50,000) used O2?** — For demo: SQLite and local FastAPI scale to local multi-user (5-10 CHWs). When Supabase is live, RLS policies handle 50k concurrent. Telegram bot rate limits are per-bot, not per-user.
 
-6. **What if the government mandates O2 for all maternal health tracking?** — ABDM compliance becomes non-negotiable, not optional. FHIR R4 must pass NHA validation. ABDM data sharing consent flows must be implemented end-to-end. The app must support ABHA authentication, not just ABHA ID lookup.
+6. **What if government mandates O2 for all maternal tracking?** — ABDM code is already in place (local ABHA generator + mock ABDM). When NHA credentials arrive, flip `USE_LIVE_ABDM=true`. FHIR models already in code. ABDM compliance is a config change, not a rewrite.
 
 ---
 
-## Raw Candidates (All Frames)
+## Raw Candidates (All Frames) — Updated for API Pivot
 
-### Integration Upgrade
-- I1: Live ABDM/NHA API (replace Mod 97 stub) — **basis: direct: Phase 1 docs explicitly defer to Phase 2**
-- I2: Live Bhashini STT/TTS API (replace stubs) — **basis: direct: Bhashini is public API with self-service registration**
-- I3: Real FHIR server sync alongside Supabase — **basis: reasoned: FHIR investment compounds; Phase 1 FHIR models make this cheap to add**
-- I4: Remove Mod 97 local validation, always call NHA API — **basis: direct: silent failure on invalid ABHA is worse than network error**
+### Integration (Local Alternatives)
+- I1: Local ABHA generator with Mod97 checksum validation — **basis: direct: NHA credentials unavailable for hackathon**
+- I2: IndicTrans2 (IIT-M) Docker container for STT/TTS — **basis: direct: Bhashini access not granted**
+- I3: SQLite as demo database (Supabase for prod) — **basis: direct: user preference for portable demo**
+- I4: Live ABDM adapter ready when NHA credentials arrive — **basis: reasoned: adapter pattern, no rewrite when switching**
 
 ### ML Risk Scoring
-- M1: Shadow-mode ML alongside rule-based thresholds — **basis: reasoned: 500-1000 patient-months sufficient for quantized XGBoost**
-- M2: Sustained-deviation alerts (Nest pattern) — **basis: reasoned: white-coat hypertension causes false positives with single-reading thresholds**
-- M3: Missed-call frequency as risk signal — **basis: direct: I2 in Inversion frame — 3+ missed calls auto-flags patient**
+- M1: XGBoost shadow ML from local venv — **basis: direct: XGBoost installed in project venv**
+- M2: Sustained-deviation alerts (Nest pattern, 3 readings/48h) — **basis: reasoned: reduces white-coat false positives**
+- M3: Missed-call frequency as risk signal — **basis: direct: SQLite tracks IVR call counts; 3+ misses = auto-flag**
 
 ### Voice Pipeline
-- V1: STT transcription of IVR voice messages — **basis: direct: Phase 1 IVR backend records audio; transcript enables search**
-- V2: Auto-generate WhatsApp text summary from STT — **basis: direct: CHW currently receives audio-only; text enables quick triage**
-- V3: Bhashini TTS for audio SBAR playback — **basis: direct: low-literacy CHW absorbs audio faster than text**
-- V4: IVR-first CHW status check (no app needed) — **basis: reasoned: feature-phone CHW workflow extends voice-only access to status**
+- V1: IndicTrans2 STT for IVR audio transcription — **basis: direct: IndicTrans2 Docker replaces Bhashini**
+- V2: Telegram text summary from STT transcript — **basis: direct: Telegram replaces Twilio**
+- V3: IndicTrans2 TTS for audio SBAR in Kannada/Hindi — **basis: direct: same Docker container does TTS**
+- V4: IVR-first CHW status check via phone call — **basis: reasoned: feature-phone CHW gets risk status without app**
 
-### Notification Layer
-- N1: Multi-recipient emergency alert (CHW + supervisor + emergency contact) — **basis: direct: assumption-breaking I5 — emergency alert is not PHC-only**
-- N2: WhatsApp broadcast integration for supervisor updates — **basis: external: WhatsApp Business API handles broadcast at scale**
-- N3: Auto-schedule follow-up from risk level — **basis: direct: removes manual date entry, drives from /risk response**
-- N4: GPS auto-tag visit logs as compliance proof — **basis: reasoned: NHM attendance requirements make GPS proof commercially valuable**
+### Notification Layer (Telegram-based)
+- N1: Multi-recipient Telegram alert (CHW + supervisor + emergency contact) — **basis: direct: Telegram bot handles all three**
+- N2: Telegram channel for supervisor SBAR updates — **basis: direct: channel broadcast, no WhatsApp needed**
+- N3: Auto-schedule follow-up from risk level — **basis: direct: removes manual date entry**
+- N4: GPS auto-tag visit logs as NHM compliance proof — **basis: direct: geolocator package, SQLite storage**
 
 ### Pilot Operations
-- P1: PHC supervisor dashboard (aggregate risk, SBAR rate, CHW activity) — **basis: direct: Phase 1 has no supervisor visibility**
-- P2: Offline map with village-level risk heat map (Waze pattern) — **basis: external: OSM offline maps + GPS coordinates**
-- P3: 30-day offline isolation design (Chakravyuh) — **basis: reasoned: rural connectivity outages can be prolonged**
-- P4: Compression + batching for low-bandwidth sync — **basis: reasoned: constraint-flip P2 — 2hr battery, poor connectivity**
-- P5: Scale test to 500 patients, 50k concurrent CHWs — **basis: reasoned: constraint-flip P5 — government mandate scenario**
-- P6: Referral slot standby queue (airline pattern) — **basis: external: hospital referral coordination has no digital system**
+- P1: PHC supervisor Flask dashboard on local SQLite — **basis: direct: Flask + SQLite for demo portability**
+- P2: Village GPS risk heat map on supervisor dashboard — **basis: reasoned: GPS clusters from visit logs, no offline tile server**
+- P3: 30-day offline isolation (SQLite sync queue) — **basis: direct: demo must work without internet**
+- P4: Compression + batching for low-bandwidth sync — **basis: reasoned: gzip FHIR bundles, batch vitals**
+- P5: Scale test to 500 patients (SQLite indexed queries) — **basis: reasoned: local SQLite validates query performance**
+- P6: Referral queue with priority (airline standby pattern) — **basis: external: SQLite referral_queue table**
 
 ### Product-Layer
-- PL1: Smart reply for CHW follow-up messages (Gmail pattern) — **basis: external: LLM generates contextual Kannada/Hindi messages**
-- PL2: Paperless referral via FHIR DocumentReference push — **basis: direct: SBAR exists in app; push to referral facility completes the loop**
-- PL3: Zero-phone patient workflow (in-person only) — **basis: reasoned: constraint-flip P4 — significant rural sub-population**
-- PL4: ABDM consent flow end-to-end — **basis: reasoned: constraint-flip P6 — government mandate triggers compliance requirement**
+- PL1: MiniMax API smart reply for CHW follow-up messages — **basis: direct: MINIMAX_API_KEY available in environment**
+- PL2: Telegram referral notification (SBAR text + audio) — **basis: direct: SBAR generated locally, sent via Telegram**
+- PL3: Zero-phone patient in-person workflow — **basis: reasoned: significant rural sub-population**
+- PL4: ABDM adapter pattern (code ready, config switches to live) — **basis: direct: adapter pattern keeps ABDM code intact**
 
 ---
 
@@ -216,32 +226,36 @@
 
 ---
 
-## Top 10 for Phase 2 (Survivor Shortlist)
+## Top 10 for Phase 2 (API-Pivoted Survivor Shortlist)
 
-1. **S1** — Live ABDM/NHA API (biggest trust/integration gap)
-2. **S2** — Live Bhashini STT/TTS (user experience differentiator)
-3. **S3** — Auto-schedule from risk level (reduces CHW manual work)
-4. **S6** — STT transcription of IVR voice messages (voice pipeline foundation)
-5. **S7** — WhatsApp text summary from STT (CHW UX improvement)
-6. **S9** — Multi-recipient emergency alert (clinical safety)
-7. **S10** — PHC supervisor dashboard (pilot partner requirement)
-8. **S5** — Shadow-mode ML risk (data compounding begins)
-9. **S11** — FHIR server sync alongside Supabase (future-proofing)
-10. **S4** — GPS auto-tag visit logs (NHM compliance value)
+1. **I1** — Local ABHA generator with Mod97 validation (NHA credentials unavailable — bridge the gap with local generation)
+2. **V1** — IndicTrans2 STT for IVR audio transcription (Bhashini access blocked — IIT-M Docker container)
+3. **N1** — Multi-recipient Telegram alert to CHW + supervisor + emergency contact (Twilio unavailable)
+4. **M1** — XGBoost shadow ML from local venv (no external ML API needed)
+5. **N3** — Auto-schedule follow-up from risk level (reduces CHW manual work)
+6. **P1** — PHC supervisor Flask dashboard on local SQLite (demo portability)
+7. **V3** — IndicTrans2 TTS for audio SBAR in Kannada/Hindi (same Docker container)
+8. **V2** — Telegram text summary from IVR STT transcript (CHW gets text + audio via Telegram)
+9. **N4** — GPS auto-tag visit logs as NHM compliance proof (geolocator + SQLite)
+10. **I4** — Live ABDM adapter ready when NHA credentials arrive (code stays, config switches)
 
 ---
 
-## Phase 2 Scope Boundaries
+## Phase 2 Scope Boundaries (API-Updated)
 
-**In scope for Phase 2:** The top 10 above + Bhashini TTS audio SBAR (S8 + S19) + ABDM consent flow (S25) for pilot PHCs.
+**In scope for Phase 2 (API-pivoted):**
+- Local ABHA generator (I1) replacing live NHA API
+- IndicTrans2 Docker for STT/TTS (V1, V2, V3) replacing Bhashini
+- Telegram bot for all notifications (N1, N2) replacing Twilio/WhatsApp
+- XGBoost shadow ML (M1) from local venv
+- PHC supervisor Flask dashboard (P1, P2) on SQLite
+- GPS auto-tag + auto-schedule (N3, N4)
+- MiniMax API smart reply for CHW follow-up (PL1)
 
 **Deferred to Phase 3:**
-- Full government ABDM compliance (beyond pilot consent)
+- Full live ABDM/NHA integration (when NHA credentials available)
+- Bhashini API (if access granted later — adapter already in place)
+- Twilio WhatsApp Business API (if credentials available later)
 - 50k concurrent CHW scale testing
-- Zero-phone patient workflow (S24)
-- Smart reply for CHW follow-up (S17) — needs LLM integration beyond Phase 2 scope
-- Offline village heat map (S16, S22) — GPS infrastructure first
-
----
-
-*Generated by ce-ideate — 6 frames, ~48 raw candidates, 28 survivors, 10 shortlisted for Phase 2*
+- Zero-phone patient workflow
+- Offline village heat map (GPS infrastructure first)

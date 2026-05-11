@@ -1,684 +1,791 @@
-# O2 Platform Phase 2 — Pilot-Ready Integration Plan
+# O2 Platform — Phase 2 Implementation Plan (API-Pivoted)
 
 **Date:** 2026-05-11  
-**Phase:** 2  
-**Status:** `active`  
-**Type:** `feat`  
-**Origin:** `docs/brainstorms/O2-Platform-Phase2-requirements.md`, `STRATEGY.md`
+**Phase:** 2 (Pilot-Ready Integration)  
+**Status:** Implementation Plan — ready to execute  
+**Based on:** `docs/ideation/O2-Platform-Phase2-ideation.md` + `docs/brainstorms/O2-Platform-Phase2-requirements.md`
 
 ---
 
-## External APIs Used in Phase 2
+## API Pivot Summary
 
-| API | Base URL | Auth | Rate Limit |
-|-----|---------|------|-----------|
-| **NHA / ABDM** | `https://.abdm.gov.in/api/v1` | HMAC-SHA256 | 100/min |
-| **Bhashini STT/TTS** | `https://meity-auth.ulcacetech.in/api/v3` | JWT Bearer | 60/min STT |
-| **Twilio SMS/WhatsApp** | `https://api.twilio.com/2010-04-01` | Basic Auth | Varies |
-| **XGBoost ONNX** | Local inference | None | N/A |
-
----
-
-## Problem Frame
-
-Phase 1 delivered a functional MVP with working stubs and mocks. Phase 2 upgrades those stubs to live APIs (ABDM NHA, Bhashini), adds the IVR transcription pipeline, multi-recipient emergency alerts, GPS visit logs, shadow ML risk scoring, and the PHC supervisor dashboard.
-
----
-
-## Success Criteria
-
-| Metric | Target |
-|--------|--------|
-| ABDM verification success | ≥95% on 3G |
-| STT accuracy (Kannada/Hindi) | ≥85% |
-| Emergency alert delivery | All 3 recipients within 60s |
-| GPS coverage on visits | ≥90% of clinical contacts |
-| ML model vs rule-based agreement | ≥70% |
-
----
-
-## High-Level Technical Design
-
-```
-Phase 2 External APIs:
-┌─────────────────────┐     ┌──────────────────────┐     ┌────────────────────┐
-│  NHA ABDM Sandbox   │     │   Bhashini v3 API   │     │   Twilio           │
-│  (HMAC-SHA256)     │     │   (JWT Bearer)      │     │   (Basic Auth)     │
-│  verify-abha        │     │   /asr, /tts        │     │   SMS + WhatsApp   │
-└────────┬────────────┘     └──────────┬───────────┘     └─────────┬──────────┘
-         │                                │                      │
-         │ All proxied through FastAPI   │                      │
-         ▼                                ▼                      ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│  FastAPI Backend (apps/o2_backend/)                                     │
-│  ├── /abdm/verify     → NHA ABDM proxy                              │
-│  ├── /bhashini/stt    → Bhashini STT proxy                         │
-│  ├── /bhashini/tts    → Bhashini TTS proxy                         │
-│  ├── /risk            → rule-based + shadow ML                      │
-│  ├── /emergency/alert → multi-recipient dispatcher                 │
-│  └── /dashboard/      → supervisor aggregates                       │
-└────────────────────────────────────────────────────────────────────────────┘
-         │                                │                       │
-         ▼                                ▼                       ▼
-┌─────────────────┐     ┌──────────────────────┐     ┌─────────────────┐
-│  Supabase       │     │  IVR Backend         │     │  Flutter App    │
-│  PostgreSQL     │     │  (ivr_backend/)       │     │  (apps/o2_app/)│
-│  + RLS          │     │  Twilio webhooks     │     │  GPS, STT/TTS  │
-│  + Auth         │     │  Bhashini STT        │     │  Auto-schedule  │
-└─────────────────┘     │  WhatsApp sender     │     └─────────────────┘
-                        └──────────────────────┘
-```
-
----
-
-## System-Wide Impact
-
-- **Supabase schema:** New columns and tables for ABDM cache, GPS, transcripts, ML scores, emergency alerts
-- **FastAPI backend:** New routers for ABDM proxy, Bhashini proxy, emergency dispatcher, dashboard API
-- **IVR backend:** Bhashini STT integration for voice transcription
-- **Flutter app:** Bhashini STT/TTS services, GPS service, auto-schedule, supervisor push notifications
-- **No breaking changes** to existing Phase 1 API contracts
+| Original API | Status | Hackathon Alternative |
+|-------------|--------|----------------------|
+| NHA/ABDM | ❌ Unavailable | Local ABHA generator + Mod97 validation |
+| Bhashini v3 | ❌ Access denied | IndicTrans2 Docker (IIT-M AI4Bharat) |
+| Twilio | ❌ Access problems | Telegram Bot API |
+| XGBoost | ✅ In local venv | Direct Python import |
+| Supabase | For prod | SQLite for demo |
+| MiniMax API | ✅ In environment | SBAR generation |
 
 ---
 
 ## Implementation Units
 
-### U1. Live ABDM/NHA API Integration
+### U1: Local ABHA Generator (replaces live ABDM/NHA)
 
-**Goal:** Replace Mod 97 checksum stub with live NHA API calls for ABHA verification.
+**What to build:**
+1. `apps/o2_backend/services/abha_generator.py` — Mod97-10 ABHA generation and validation
+2. `apps/o2_backend/routers/abdm.py` — FastAPI endpoints: `/abdm/generate-abha`, `/abdm/validate-abha`, `/abdm/register-patient`
+3. Update `apps/o2_app/lib/abdm/abdm_service.dart` — local validation + backend calls
+4. SQLite schema for patients table with ABHA
 
-**Requirements:** R1 from origin doc  
-**Dependencies:** None (first unit — no dependencies)
+**Files to create/modify:**
+- `apps/o2_backend/services/abha_generator.py` (new)
+- `apps/o2_backend/routers/abdm.py` (new)
+- `apps/o2_app/lib/abdm/abdm_service.dart` (update)
+- `apps/o2_backend/services/database.py` (new — SQLite setup)
+- `supabase/schema.sql` (update — add patient table DDL for SQLite migration)
 
-**Files:**
-- `apps/o2_app/lib/abdm/abdm_service.dart` — Replace `_validateChecksum()` with HTTP call to FastAPI proxy
-- `apps/o2_backend/routers/abdm.py` — New router for ABDM proxy endpoints
-- `apps/o2_backend/routers/__init__.py` — Export `abdm` router
-- `apps/o2_backend/main.py` — Register `abdm` router
-- `supabase/schema.sql` — Add `abha_verification_cache` table
+**Code contracts:**
 
-**Approach:**
-```
-CHW enters ABHA number
-    ↓
-Flutter calls POST /abdm/verify {healthId: "12-3456-7890-1234"}
-    ↓
-FastAPI computes HMAC-SHA256: clientId + timestamp + healthId
-    ↓
-FastAPI POST https://.abdm.gov.in/api/v1/abd-v1/discovery/verify-abha
-    ↓
-Cache result in abha_verification_cache (24h TTL)
-    ↓
-Return to Flutter: {verified: true, name: "Lakshmi", dob: "1998-03-15"}
-    ↓
-Patient record auto-filled; ABHA linked
-```
-
-**HMAC signature computation (Python):**
 ```python
-import hmac, hashlib, datetime, json
+# apps/o2_backend/services/abha_generator.py
+import random
+import re
 
-def compute_hmac(health_id: str) -> str:
-    timestamp = datetime.utcnow().isoformat() + "Z"
-    message = f"{os.getenv('NHA_CLIENT_ID')}|{timestamp}|{health_id}"
-    sig = hmac.new(
-        os.getenv('NHA_SECRET').encode(),
-        message.encode(),
-        hashlib.sha256
-    ).hexdigest()
-    return sig
+def generate_abha_number() -> str:
+    """14-digit ABHA with valid Mod97 checksum."""
+    prefix = str(random.randint(10**11, 10**12 - 1))
+    check = (98 - (int(prefix) % 97)) % 97
+    return prefix + f"{check:02d}"
+
+def validate_abha(abha: str) -> bool:
+    """Mod97-10 validation (ISO/IEC 7064)."""
+    if not re.match(r'^\d{14}$', abha):
+        return False
+    return (int(abha) % 97) == 1
 ```
 
-**Environment variables needed:**
-```bash
-NHA_CLIENT_ID=your_nha_client_id
-NHA_CLIENT_SECRET=your_nha_secret
-NHA_HMAC_KEY=your_hmac_key
-NHA_BASE_URL=https://.abdm.gov.in/api/v1
+```python
+# apps/o2_backend/routers/abdm.py
+@router.post("/abdm/generate-abha")
+def generate_abha():
+    return {"abha_number": generate_abha_number(), "valid": True}
+
+@router.post("/abdm/validate-abha")
+def validate_abha(abha: str):
+    if not validate_abha(abha):
+        raise HTTPException(status_code=400, detail="Invalid ABHA checksum")
+    return {"abha_number": abha, "valid": True, "source": "local"}
 ```
 
-**Supabase schema:**
+**SQLite schema:**
 ```sql
-CREATE TABLE abha_verification_cache (
-    abha_number TEXT PRIMARY KEY,
-    name TEXT,
-    dob TEXT,
-    gender TEXT,
-    mobile TEXT,
-    verified BOOLEAN NOT NULL,
-    fetched_at TIMESTAMPTZ DEFAULT NOW(),
-    expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '24 hours'
+CREATE TABLE patients (
+    id TEXT PRIMARY KEY,
+    abha_number TEXT UNIQUE NOT NULL,
+    name TEXT NOT NULL,
+    phone TEXT,
+    emergency_contact TEXT,
+    emergency_contact_phone TEXT,
+    chw_telegram_id TEXT,
+    emergency_contact_telegram TEXT,
+    phc_id TEXT NOT NULL,
+    risk_level TEXT DEFAULT 'LOW',
+    created_at TEXT DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_abha_cache_expires ON abha_verification_cache(expires_at);
+CREATE INDEX idx_patients_abha ON patients(abha_number);
+CREATE INDEX idx_patients_phc ON patients(phc_id);
 ```
 
-**Patterns to follow:** `apps/o2_backend/routers/sbar.py` — proxy pattern with error handling and timeout
+**Env vars:**
+```bash
+USE_LIVE_ABDM=false
+# Set true + fill NHA vars when credentials arrive
+```
 
-**Test scenarios:**
-- Happy path: valid ABHA → `verified: true`, name/DOB returned
-- Invalid ABHA → `verified: false`, user-friendly error
-- Network timeout → exponential backoff 3x (2s, 4s, 8s), then warn-and-proceed
-- Cache hit → no NHA API call, instant return
-- Offline → use cache if available, else warn CHW
+**Dependencies:** `aiosqlite` for async SQLite
 
 ---
 
-### U2. Live Bhashini STT/TTS Integration
+### U2: IndicTrans2 STT/TTS (replaces Bhashini)
 
-**Goal:** Replace stubs in `constants.dart` with live Bhashini API v3 calls.
+**What to build:**
+1. `apps/o2_backend/services/indictrans_stt.py` — audio → text
+2. `apps/o2_backend/services/indictrans_tts.py` — text → audio
+3. `apps/o2_app/lib/services/indictrans_stt_service.dart` (new)
+4. `apps/o2_app/lib/services/indictrans_tts_service.dart` (new)
+5. IVR transcription pipeline: audio → IndicTrans2 STT → SQLite → Telegram message
 
-**Requirements:** R2 from origin doc  
-**Dependencies:** None (parallel with U1)
+**Files to create/modify:**
+- `apps/o2_backend/services/indictrans_stt.py` (new)
+- `apps/o2_backend/services/indictrans_tts.py` (new)
+- `apps/o2_backend/routers/telegram_bot.py` (new — IVR → Telegram pipeline)
+- `apps/o2_app/lib/services/indictrans_stt_service.dart` (new)
+- `apps/o2_app/lib/services/indictrans_tts_service.dart` (new)
+- `ivr_backend/requirements.txt` (add `requests`)
 
-**Files:**
-- `apps/o2_app/lib/services/bhashini_stt_service.dart` — New: Bhashini STT service
-- `apps/o2_app/lib/services/bhashini_tts_service.dart` — New: Bhashini TTS service
-- `apps/o2_app/lib/core/constants.dart` — Update to use new services
-- `apps/o2_backend/routers/bhashini.py` — New: Bhashini proxy router (for IVR backend)
-- `apps/o2_backend/main.py` — Register `bhashini` router
-- `apps/o2_backend/requirements.txt` — Add `httpx`
-- `ivr_backend/main.py` — Integrate Bhashini STT for voice transcription
+**Code contracts:**
 
-**Environment variables needed:**
-```bash
-BHASHINI_CLIENT_ID=your_bhashini_client_id
-BHASHINI_CLIENT_SECRET=your_bhashini_client_secret
-BHASHINI_BASE_URL=https://meity-auth.ulcacetech.in/api/v3
-```
-
-**Token management:**
 ```python
-# Cached token with proactive refresh
-_token_cache = {"token": None, "expires_at": 0}
+# apps/o2_backend/services/indictrans_stt.py
+INDICTRANS_URL = os.getenv("INDICTRANS_URL", "http://localhost:8000")
 
-async def get_bhashini_token() -> str:
-    if time.time() < _token_cache["expires_at"] - 300:  # refresh 5min early
-        return _token_cache["token"]
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://auth.ulcacetech.in/api/v1/telemetry",
-            data={
-                "grant_type": "client_credentials",
-                "client_id": os.getenv("BHASHINI_CLIENT_ID"),
-                "client_secret": os.getenv("BHASHINI_CLIENT_SECRET"),
-            },
-            timeout=10.0,
+async def transcribe_audio(audio_path: str, lang: str = "kan") -> str:
+    with open(audio_path, 'rb') as f:
+        resp = requests.post(
+            f"{INDICTRANS_URL}/asr",
+            files={"audio": f},
+            data={"language": lang}
         )
-        data = resp.json()
-        _token_cache["token"] = data["access_token"]
-        _token_cache["expires_at"] = time.time() + data["expires_in"]
-    return _token_cache["token"]
-```
+    return resp.json().get("text", "")
 
-**STT flow (Flutter):**
-```dart
-class BhashiniSttService {
-  Future<String> transcribe(File audioFile, String language) async {
-    final token = await _getToken();
-    final formData = FormData.fromMap({
-      'audioSource': 'byte',
-      'inputLanguage': language,  // 'kn' or 'hi'
-      'fileType': 'wav',
-      'model': 'medium',
-      'purpose': 'healthcare',
-    });
-    formData.files.add(await MultipartFile.fromFile(
-      audioFile.path, filename: 'recording.wav'));
-    final response = await dio.post(
-      'https://meity-auth.ulcacetech.in/api/v3/asr',
-      data: formData,
-      options: Options(headers: {'Authorization': 'Bearer $token'}),
-    );
-    return BhashiniSttResponse.fromJson(response.data).text;
-  }
-}
-```
-
-**TTS caching strategy:** Pre-generate and cache common phrases (risk level descriptions, follow-up instructions) at app launch.
-
-**Patterns to follow:** `apps/o2_app/lib/services/fhir_serializer.dart` — service pattern with interface
-
-**Test scenarios:**
-- STT: Kannada audio → correct Kannada text
-- STT: Hindi audio → correct Hindi text
-- TTS: "BP elevated" → audio plays in <3s
-- Token refresh: 55min proactive refresh → no auth failures
-- Network failure → graceful degradation to text-only
-
----
-
-### U3. GPS Auto-Tag + Auto-Schedule
-
-**Goal:** Auto-capture GPS on clinical contact + auto-schedule follow-ups from risk level.
-
-**Requirements:** R3, R8 from origin doc  
-**Dependencies:** U1 (risk level needed for auto-schedule)
-
-**Files:**
-- `apps/o2_app/lib/services/location_service.dart` — New: GPS capture service
-- `apps/o2_app/lib/repositories/clinical_contact_repository.dart` — Add GPS + scheduled_follow_up fields
-- `apps/o2_app/lib/screens/patient_detail_screen.dart` — Display auto-schedule banner
-- `supabase/schema.sql` — Add `visit_location` JSONB + `scheduled_follow_up` TIMESTAMPTZ + `follow_up_source`
-- `apps/o2_backend/routers/risk.py` — Add `scheduled_follow_up` to risk response
-
-**Supabase schema:**
-```sql
-ALTER TABLE clinical_contact_logs ADD COLUMN visit_location JSONB;
--- {"lat": 12.9716, "lng": 77.5946, "accuracy": 15.0, "timestamp": "2026-05-28T09:30:00Z"}
-
-ALTER TABLE clinical_contact_logs ADD COLUMN scheduled_follow_up TIMESTAMPTZ;
-ALTER TABLE clinical_contact_logs ADD COLUMN follow_up_source TEXT DEFAULT 'manual';
-```
-
-**GPS capture:**
-```dart
-class LocationService {
-  Future<LocationData?> captureLocation() async {
-    try {
-      final permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-      if (permission == LocationPermission.denied || 
-          permission == LocationPermission.deniedForever) {
-        return null;  // Do not block clinical workflow
-      }
-      return await Geolocator.getCurrentPosition(
-        locationSettings: LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 10),
-        ),
-      );
-    } catch (e) {
-      return null;  // GPS failure is non-fatal
-    }
-  }
-}
-```
-
-**Auto-schedule intervals:**
-```dart
-Duration getFollowUpInterval(String riskLevel) {
-  switch (riskLevel) {
-    case 'EMERGENCY': return Duration(hours: 0);  // immediate
-    case 'HIGH': return Duration(hours: 24);
-    case 'MEDIUM': return Duration(hours: 48);
-    case 'LOW': return Duration(days: 7);
-  }
-}
-```
-
-**Patterns to follow:** `apps/o2_app/lib/services/sync_service.dart` — offline-first service pattern
-
-**Test scenarios:**
-- GPS captured → stored in `clinical_contact_logs.visit_location`
-- GPS unavailable → null stored, clinical workflow continues
-- Risk HIGH → follow-up auto-created for next day
-- CHW modifies auto-schedule → modified date stored, `follow_up_source` = 'manual'
-- Offline → GPS + schedule queued, synced on WorkManager window
-
----
-
-### U4. IVR Voice Transcription Pipeline
-
-**Goal:** Transcribe Twilio recordings via Bhashini STT; send WhatsApp text summary to CHW.
-
-**Requirements:** R4, R5 from origin doc  
-**Dependencies:** U2 (Bhashini STT must be live first)
-
-**Files:**
-- `ivr_backend/main.py` — Integrate STT after Twilio webhook fires
-- `ivr_backend/transcription_service.py` — New: audio download + chunking + Bhashini STT call
-- `ivr_backend/whatsapp_sender.py` — Add text summary alongside audio
-- `apps/o2_backend/routers/bhashini.py` — Share Bhashini proxy (used by IVR + Flutter)
-- `supabase/schema.sql` — Add `voice_transcripts` table
-
-**Supabase schema:**
-```sql
-CREATE TABLE voice_transcripts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    patient_id TEXT NOT NULL REFERENCES patients(id),
-    recording_url TEXT NOT NULL,
-    transcript_text TEXT,
-    transcript_language TEXT,
-    confidence_score FLOAT,
-    is_emergency BOOLEAN DEFAULT FALSE,
-    whatsapp_summary_sent BOOLEAN DEFAULT FALSE,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX idx_transcripts_patient ON voice_transcripts(patient_id);
-CREATE INDEX idx_transcripts_emergency ON voice_transcripts(is_emergency) WHERE is_emergency = TRUE;
-```
-
-**Transcription flow:**
-```python
-async def transcribe_recording(recording_url: str, patient_language: str) -> dict:
-    audio_data = await download_audio(recording_url)  # from Twilio CDN
-    
-    # Split if >60s
-    chunks = split_audio(audio_data, max_duration=55)  # 5s overlap for continuity
-    
-    full_transcript = []
-    for chunk in chunks:
-        result = await call_bhashini_stt(chunk, patient_language)
-        full_transcript.append(result["text"])
-    
-    transcript = " ".join(full_transcript)
-    confidence = mean([r["confidence"] for r in results])
-    
-    is_emergency = check_emergency_keywords(transcript)
-    
-    await save_transcript(patient_id, recording_url, transcript, confidence, is_emergency)
-    await send_whatsapp_summary(patient_id, transcript)
-    
-    return {"transcript": transcript, "is_emergency": is_emergency}
-```
-
-**Patterns to follow:** `ivr_backend/patient_lookup.py` — sequential async pipeline pattern
-
-**Test scenarios:**
-- Recording <60s → full transcript returned
-- Recording >60s → chunked correctly, transcript assembled
-- Bhashini timeout → audio-only WhatsApp (Phase 1 fallback)
-- Emergency keyword in transcript → emergency alert triggered
-- Transcript searchable in supervisor dashboard
-
----
-
-### U5. Multi-Recipient Emergency Alert + Shadow ML Risk
-
-**Goal:** Emergency alert to CHW + supervisor + emergency contact. Shadow ML runs alongside rule-based.
-
-**Requirements:** R6, R7 from origin doc  
-**Dependencies:** U1 (ABHA for emergency contact), U4 (alert trigger)
-
-**Files:**
-- `apps/o2_app/lib/services/emergency_alert_service.dart` — New: multi-recipient dispatcher
-- `apps/o2_backend/routers/risk.py` — Add shadow ML score to `/risk` response
-- `apps/o2_backend/services/ml_model.py` — New: quantized XGBoost inference
-- `apps/o2_backend/requirements.txt` — Add `xgboost`, `onnxruntime`, `onnxmltools`
-- `supabase/schema.sql` — Add `emergency_alert_log`, `ml_risk_scores`
-- `supabase/schema.sql` — Add `supervisors` table
-
-**Environment variables:**
-```bash
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxx
-SUPERVISOR_SMS_ENABLED=true
-```
-
-**Emergency alert flow:**
-```python
-async def send_emergency_alert(patient_id: str, risk_level: str, vitals: dict):
-    patient = await get_patient(patient_id)
-    chw = await get_chw(patient.chw_id)
-    supervisor = await get_supervisor(patient.phc_id)
-    emergency_contact = patient.emergency_contact_phone
-    
-    tasks = [
-        send_whatsapp(chw.phone, format_chw_alert(patient, vitals)),      # CHW
-        send_sms(supervisor.phone, format_supervisor_sms(patient, vitals)), # Supervisor
-        send_sms(emergency_contact, format_ec_sms(patient)),               # Emergency contact
-    ]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    
-    for i, (recipient, result) in enumerate(zip(recipients, results)):
-        await log_alert(patient_id, recipient, success=isinstance(result, str), error=result if isinstance(result, Exception) else None)
-```
-
-**Shadow ML flow:**
-```python
-async def compute_shadow_ml(vitals: dict, patient_id: str) -> dict:
-    features = [
-        vitals["systolic_bp"],
-        vitals["diastolic_bp"],
-        vitals["hemoglobin"],
-        vitals["weight_kg"],
-        vitals["weeks_pregnant"],
-        vitals.get("temperature_c", 37.0),
-        vitals.get("fetal_heart_rate", 140),
-        len(vitals.get("previous_complications", [])),
-        vitals.get("missed_call_frequency_7d", 0),
-    ]
-    
-    session = InferenceSession("risk_model.onnx")
-    input_tensor = np.array([features], dtype=np.float32)
-    result = session.run(None, {"input": input_tensor})
-    
-    ml_probability = float(result[0][0][1])
-    
-    await log_ml_score(patient_id, vitals, ml_probability, "xgboost-v1")
-    
-    return {
-        "ml_probability": ml_probability,
-        "ml_confidence": 0.82,
-        "model_version": "xgboost-v1",
-        "training_samples": 1247,
-    }
-```
-
-**Supabase schema additions:**
-```sql
-CREATE TABLE emergency_alert_log (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    patient_id TEXT NOT NULL,
-    risk_level TEXT NOT NULL,
-    chw_notified BOOLEAN DEFAULT FALSE,
-    chw_notified_at TIMESTAMPTZ,
-    supervisor_notified BOOLEAN DEFAULT FALSE,
-    supervisor_notified_at TIMESTAMPTZ,
-    emergency_contact_notified BOOLEAN DEFAULT FALSE,
-    emergency_contact_notified_at TIMESTAMPTZ,
-    failure_reason TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE TABLE ml_risk_scores (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    patient_id TEXT NOT NULL,
-    vitals_input JSONB NOT NULL,
-    rule_based_level TEXT NOT NULL,
-    rule_based_score INTEGER NOT NULL,
-    ml_probability FLOAT NOT NULL,
-    ml_confidence FLOAT,
-    model_version TEXT NOT NULL,
-    training_samples INTEGER,
-    outcome_label BOOLEAN,  -- filled later
-    outcome_labeled_at TIMESTAMPTZ,
-    labeled_by TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-CREATE INDEX idx_ml_scores_unlabeled ON ml_risk_scores(outcome_label) WHERE outcome_label IS NULL;
-```
-
-**Patterns to follow:** `apps/o2_backend/services/risk_model.py` — service class pattern with clear method signatures
-
-**Test scenarios:**
-- EMERGENCY → WhatsApp to CHW + SMS to supervisor + SMS to emergency contact
-- SMS failure → retry once, then log failure
-- Shadow ML score computed and logged alongside rule-based score
-- ML vs rule-based agreement ≥70% on test set
-
----
-
-### U6. PHC Supervisor Dashboard
-
-**Goal:** Web dashboard for PHC supervisors to monitor aggregate health data.
-
-**Requirements:** R9 from origin doc  
-**Dependencies:** U3, U4, U5 (data sources must exist first)
-
-**Files:**
-- `apps/supervisor_dashboard/` — New: Flutter web or HTML/JS dashboard
-- `apps/supervisor_dashboard/lib/screens/` — Dashboard screens
-- `apps/supervisor_dashboard/lib/services/supabase_service.dart` — Supabase client
-- `apps/supervisor_dashboard/lib/models/` — Dashboard models
-- `supabase/schema.sql` — Add `supervisor_views` (materialized view or RLS policies for supervisor role)
-- `supabase/rls_policies.sql` — Add supervisor role + PHC-scoped RLS
-- `apps/o2_backend/routers/dashboard.py` — New: dashboard API router
-- `apps/o2_backend/main.py` — Register `dashboard` router
-- `apps/o2_app/lib/services/supervisor_notification_service.dart` — App push for supervisors
-
-**Auth:** Supabase Auth with `supervisor` role. Supervisors sign up with their PHC ID.
-
-**RLS for supervisor:**
-```sql
-CREATE ROLE supervisor;
-GRANT supervisor TO authenticated_users;
-
-CREATE POLICY "Supervisors see only their PHC"
-ON patients FOR SELECT
-USING (
-    phc_id IN (
-        SELECT phc_id FROM supervisor_assignments
-        WHERE user_id = auth.uid()
+async def transcribe_from_url(audio_url: str, lang: str = "kan") -> str:
+    audio_data = requests.get(audio_url).content
+    resp = requests.post(
+        f"{INDICTRANS_URL}/asr",
+        files={"audio": ("recording.wav", audio_data, "audio/wav")},
+        data={"language": lang}
     )
+    return resp.json().get("text", "")
+```
+
+```python
+# apps/o2_backend/services/indictrans_tts.py
+
+async def synthesize_speech(text: str, lang: str = "kan", output_path: str = "output.wav") -> str:
+    resp = requests.post(
+        f"{INDICTRANS_URL}/tts",
+        json={"text": text, "language": lang}
+    )
+    with open(output_path, 'wb') as f:
+        f.write(resp.content)
+    return output_path
+```
+
+**SQLite schema:**
+```sql
+CREATE TABLE ivr_transcripts (
+    id TEXT PRIMARY KEY,
+    patient_id TEXT NOT NULL,
+    audio_path TEXT,
+    transcript_text TEXT,
+    language TEXT DEFAULT 'kn',
+    created_at TEXT DEFAULT (datetime('now')),
+    FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
 ```
 
-**Dashboard queries:**
-```sql
--- HIGH/EMERGENCY by village
-SELECT p.village,
-       COUNT(*) FILTER (WHERE v.risk_level = 'HIGH') as high_count,
-       COUNT(*) FILTER (WHERE v.risk_level = 'EMERGENCY') as emergency_count
-FROM patients p
-JOIN vitals_logs v ON v.patient_id = p.id
-WHERE p.phc_id = current_user_phc()
-  AND v.created_at > NOW() - INTERVAL '7 days'
-GROUP BY p.village
-ORDER BY (high_count + emergency_count) DESC;
-
--- CHW activity today
-SELECT chw_id,
-       COUNT(*) as total_visits,
-       SUM(sbar_generated::int) as sbars_generated
-FROM clinical_contact_logs
-WHERE DATE(created_at) = CURRENT_DATE
-  AND phc_id = current_user_phc()
-GROUP BY chw_id;
-```
-
-**Push notifications:** Use Flutter `firebase_messaging` on supervisor's Android device.
-
-**Patterns to follow:** `apps/o2_app/lib/core/router.dart` — GoRouter with auth guard pattern
-
-**Test scenarios:**
-- Supervisor logs in → sees only their PHC's patients
-- Dashboard loads within 2 seconds
-- Visit map displays GPS coordinates with village labels
-- IVR volume shows transcriptions for past 7 days
-
----
-
-## Scope Boundaries
-
-### Deferred to Phase 3
-- Full ABDM HIU certification
-- On-device quantized LLM for SBAR
-- Zero-phone patient workflow
-- 50k concurrent CHW scale testing
-
-### Out of Scope
-- Indic-2 translation (Bhashini direct languages only)
-- Smart reply for CHW WhatsApp follow-up
-
----
-
-## Dependencies
-
-| Unit | Depends On |
-|------|-----------|
-| U2 (Bhashini) | None |
-| U1 (ABDM) | None |
-| U3 (GPS + Auto-schedule) | U1 |
-| U4 (IVR Transcription) | U2 |
-| U5 (Emergency + Shadow ML) | U1, U4 |
-| U6 (Supervisor Dashboard) | U3, U4, U5 |
-
-**Parallelization:** U1 and U2 are independent and should be started together.
-
----
-
-## Risks
-
-| Risk | Probability | Impact | Mitigation |
-|------|------------|--------|-------------|
-| Bhashini rate limit exceeded | Medium | High | Cache TTS; queue STT requests; exponential backoff |
-| ABDM sandbox credentials unavailable | Low | High | Mod 97 fallback + warn CHW; no blocking |
-| ML model underperforms | Medium | Medium | Shadow mode only; no clinical decisions |
-| GPS fails in dense areas | Low | Low | Null gracefully; do not block workflow |
-| Twilio SMS cost overrun | Low | Medium | Budget threshold alert; supervisor approval |
-| IVR transcription failure | Medium | Low | Fallback to audio-only WhatsApp |
-
----
-
-## Test Strategy
-
-Each unit has specific scenarios (see unit definitions above).
-
-**Integration test scenarios:**
-1. Patient voice message → transcript → WhatsApp text to CHW
-2. Vitals submitted → rule-based + ML both scored → both logged
-3. EMERGENCY → all three alerts delivered within 60s
-4. GPS + auto-schedule queued offline → synced correctly on reconnect
-5. Supervisor logs in → sees only their PHC's data
-
----
-
-## Environment Variables
-
+**Env vars:**
 ```bash
-# ABDM / NHA
-NHA_CLIENT_ID=
-NHA_CLIENT_SECRET=
-NHA_HMAC_KEY=
-NHA_BASE_URL=https://.abdm.gov.in/api/v1
+INDICTRANS_URL=http://localhost:8000
+USE_BHASHINI=false  # true when Bhashini credentials available
+```
 
-# Bhashini
-BHASHINI_CLIENT_ID=
-BHASHINI_CLIENT_SECRET=
-BHASHINI_BASE_URL=https://meity-auth.ulcacetech.in/api/v3
+**Dependencies:** `requests` (add to ivr_backend/requirements.txt and apps/o2_backend/requirements.txt)
 
-# Twilio
-TWILIO_ACCOUNT_SID=ACxxxxxxxxxxxxxxxx
-TWILIO_AUTH_TOKEN=xxxxxxxxxxxxxxxx
-TWILIO_PHONE_NUMBER=+1xxxxxxxxxx
-
-# ML Model
-ML_MODEL_PATH=models/risk_model.onnx
-ML_MODEL_VERSION=xgboost-v1
-
-# Supabase
-SUPABASE_URL=https://xxxx.supabase.co
-SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+**One-time Docker setup:**
+```bash
+docker pull aiforskill/indictrans2:latest
+docker run -d -p 8000:8000 --name indictrans aiforskill/indictrans2:latest
 ```
 
 ---
 
-## Flutter Packages (Phase 2 New)
+### U3: GPS Auto-Tag + Auto-Schedule
 
+**What to build:**
+1. `apps/o2_app/lib/services/gps_service.dart` — geolocator + visit logging
+2. `apps/o2_backend/routers/visits.py` — `/visits/log` endpoint with auto-schedule logic
+3. SQLite `visits` table and `visit_schedules` table
+4. Update patient model to store GPS of last visit
+
+**Files to create/modify:**
+- `apps/o2_app/lib/services/gps_service.dart` (new)
+- `apps/o2_backend/routers/visits.py` (new)
+- `apps/o2_app/lib/repositories/patient_repository.dart` (update — add visit fields)
+- `apps/o2_app/pubspec.yaml` (add `geolocator` dependency)
+
+**Code contracts:**
+
+```dart
+// apps/o2_app/lib/services/gps_service.dart
+import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
+
+class GpsService {
+  final String baseUrl;
+  
+  Future<Position?> getCurrentPosition() async {
+    bool service = await Geolocator.isLocationServiceEnabled();
+    if (!service) return null;
+    
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+    }
+    
+    return await Geolocator.getCurrentPosition(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+      ),
+    );
+  }
+  
+  Future<void> logVisit(String patientId) async {
+    final pos = await getCurrentPosition();
+    if (pos == null) return;
+    
+    await http.post(Uri.parse('$baseUrl/visits/log'), json: {
+      'patient_id': patientId,
+      'latitude': pos.latitude,
+      'longitude': pos.longitude,
+      'chw_id': currentChwId,
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+  }
+}
+```
+
+```python
+# apps/o2_backend/routers/visits.py
+from datetime import datetime, timedelta
+
+@router.post("/visits/log")
+async def log_visit(request: VisitLogRequest):
+    visit_id = generate_uuid()
+    await db.visits.insert({
+        "id": visit_id,
+        "patient_id": request.patient_id,
+        "latitude": request.latitude,
+        "longitude": request.longitude,
+        "chw_id": request.chw_id,
+    })
+    
+    # Auto-schedule from risk
+    patient = await db.patients.get(request.patient_id)
+    risk = patient.get("risk_level", "LOW")
+    
+    if risk == "HIGH":
+        follow_up = datetime.utcnow() + timedelta(hours=24)
+    elif risk == "MEDIUM":
+        follow_up = datetime.utcnow() + timedelta(days=3)
+    else:
+        follow_up = datetime.utcnow() + timedelta(days=7)
+    
+    await db.visit_schedules.insert({
+        "patient_id": request.patient_id,
+        "scheduled_at": follow_up.isoformat(),
+        "status": "scheduled",
+        "auto_generated": True,
+    })
+    
+    return {"visit_id": visit_id, "follow_up": follow_up.isoformat()}
+```
+
+**SQLite schema:**
+```sql
+CREATE TABLE visits (
+    id TEXT PRIMARY KEY,
+    patient_id TEXT NOT NULL,
+    latitude REAL NOT NULL,
+    longitude REAL NOT NULL,
+    chw_id TEXT NOT NULL,
+    recorded_at TEXT DEFAULT (datetime('now')),
+    sync_status TEXT DEFAULT 'synced'
+);
+CREATE INDEX idx_visits_patient ON visits(patient_id);
+
+CREATE TABLE visit_schedules (
+    id TEXT PRIMARY KEY,
+    patient_id TEXT NOT NULL,
+    scheduled_at TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    auto_generated INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+```
+
+**Flutter pubspec add:**
 ```yaml
-# apps/o2_app/pubspec.yaml — add:
 dependencies:
   geolocator: ^13.0.0
-  firebase_messaging: ^15.0.0
-  flutter_map: ^7.0.0  # For supervisor dashboard map
-  latlong2: ^0.9.0
+  permission_handler: ^11.3.0
+```
 
-dev_dependencies:
-  onnxruntime: ^1.19.0
+**Android manifest add:**
+```xml
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 ```
 
 ---
 
-## Python Packages (Phase 2 New)
+### U4: IVR Voice Transcription Pipeline
 
-```txt
-# apps/o2_backend/requirements.txt — add:
-httpx==0.28.1
-xgboost==2.1.3
-onnxmltools==1.11.3
-onnxruntime==1.20.1
-firebase-admin==6.5.0
+**What to build:**
+1. `ivr_backend/transcriber.py` — IndicTrans2 STT integration with IVR audio files
+2. Update `ivr_backend/main.py` to call transcription on recorded audio
+3. Telegram message dispatch to CHW with transcript text
+
+**Files to create/modify:**
+- `ivr_backend/transcriber.py` (new)
+- `ivr_backend/main.py` (update — call transcriber on voice recording)
+- `apps/o2_backend/routers/telegram_bot.py` (update — `/telegram/webhook` handler)
+
+**Code contracts:**
+
+```python
+# ivr_backend/transcriber.py
+import sys
+sys.path.insert(0, '/home/syed/dev/AAVISHKAR-PRAVAH/apps/o2_backend')
+from services.indictrans_stt import transcribe_from_url
+from services.telegram_service import send_transcript_to_chw
+
+async def process_ivr_recording(audio_url: str, patient_id: str, chw_telegram_id: str):
+    """Process IVR voice recording: transcribe + send to CHW via Telegram."""
+    try:
+        transcript = await transcribe_from_url(audio_url, lang="kan")
+        
+        # Store in SQLite
+        await db.ivr_transcripts.insert({
+            "id": generate_uuid(),
+            "patient_id": patient_id,
+            "audio_url": audio_url,
+            "transcript_text": transcript,
+        })
+        
+        # Send to CHW via Telegram
+        await send_transcript_to_chw(
+            chat_id=chw_telegram_id,
+            patient_id=patient_id,
+            transcript=transcript,
+            audio_url=audio_url
+        )
+        
+        return {"status": "success", "transcript": transcript}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+```
+
+```python
+# ivr_backend/main.py — add to existing IVR flow
+from transcriber import process_ivr_recording
+
+@app.post("/ivr/recording-complete")
+async def recording_complete(request: RecordingCompleteRequest):
+    # existing: save recording to disk
+    audio_path = save_recording(request.audio_url)
+    
+    # NEW: transcribe + send to CHW
+    patient = await patient_lookup(request.caller_id)
+    if patient:
+        result = await process_ivr_recording(
+            audio_url=request.audio_url,
+            patient_id=patient["id"],
+            chw_telegram_id=patient["chw_telegram_id"]
+        )
+    
+    return {"status": "processed"}
+```
+
+---
+
+### U5: Multi-Recipient Alerts + XGBoost Shadow ML
+
+**What to build:**
+1. `apps/o2_backend/services/alert_service.py` — multi-recipient Telegram alerts
+2. `apps/o2_backend/services/ml_risk_scorer.py` — XGBoost shadow ML
+3. Update `/risk` endpoint to return both scores
+4. SQLite schema for ml_risk_scores
+
+**Files to create/modify:**
+- `apps/o2_backend/services/alert_service.py` (new)
+- `apps/o2_backend/services/ml_risk_scorer.py` (new)
+- `apps/o2_backend/routers/risk.py` (update — add ml_shadow to response)
+- `apps/o2_backend/routers/sbar.py` (update — use risk from ml_risk_scorer)
+
+**Code contracts:**
+
+```python
+# apps/o2_backend/services/alert_service.py
+import telegram
+import os
+
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+SUPERVISOR_CHAT_ID = os.getenv("SUPERVISOR_TELEGRAM_ID")
+
+async def send_clinical_alert(patient: dict, vitals: dict, risk_level: str):
+    """Send alert to CHW + supervisor + emergency contact via Telegram."""
+    alert_text = format_clinical_alert(patient, vitals, risk_level)
+    
+    bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
+    
+    recipients = [
+        patient.get("chw_telegram_id"),
+        SUPERVISOR_CHAT_ID,
+        patient.get("emergency_contact_telegram"),
+    ]
+    
+    await asyncio.gather(*[
+        bot.send_message(chat_id=cid, text=alert_text)
+        for cid in recipients if cid
+    ])
+
+def format_clinical_alert(patient, vitals, risk) -> str:
+    return (
+        f"🚨 CLINICAL ALERT\n"
+        f"Patient: {patient.get('name')} ({patient.get('abha_number')})\n"
+        f"Risk Level: {risk}\n"
+        f"Vitals: BP {vitals.get('systolic_bp')}/{vitals.get('diastolic_bp')}, "
+        f"HR {vitals.get('heart_rate')}, SpO2 {vitals.get('spo2')}\n"
+        f"Action: {'EMERGENCY - visit immediately' if risk == 'HIGH' else 'Schedule within 24h'}"
+    )
+```
+
+```python
+# apps/o2_backend/services/ml_risk_scorer.py
+import xgboost as xgb
+import numpy as np
+
+class XGBoostRiskScorer:
+    def __init__(self, model_path: str = "models/risk_model.json"):
+        self.model = xgb.XGBClassifier()
+        self.model.load_model(model_path)
+        self.features = [
+            'systolic_bp', 'diastolic_bp', 'heart_rate', 'spo2',
+            'temperature', 'weight_kg', 'height_cm', 'age', 'gestation_weeks'
+        ]
+    
+    def predict(self, vitals: dict, patient: dict) -> dict:
+        X = np.array([[vitals.get(f, 0) for f in self.features]])
+        prob = float(self.model.predict_proba(X)[0][1])
+        return {
+            "ml_probability": round(prob, 3),
+            "ml_level": "HIGH" if prob > 0.3 else "MEDIUM" if prob > 0.1 else "LOW",
+            "features": dict(zip(self.features, X[0].tolist()))
+        }
+    
+    def rule_based(self, vitals: dict) -> str:
+        s, d, hr, spo2 = (vitals.get(k, 0) for k in 
+            ['systolic_bp', 'diastolic_bp', 'heart_rate', 'spo2'])
+        if s >= 160 or d >= 110 or spo2 < 90:
+            return "HIGH"
+        if s >= 140 or d >= 90 or hr > 100 or spo2 < 95:
+            return "MEDIUM"
+        return "LOW"
+```
+
+**SQLite schema:**
+```sql
+CREATE TABLE ml_risk_scores (
+    id TEXT PRIMARY KEY,
+    patient_id TEXT NOT NULL,
+    ml_probability REAL,
+    rule_based_level TEXT,
+    ml_level TEXT,
+    features_json TEXT,
+    outcome_label TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_ml_patient ON ml_risk_scores(patient_id);
+```
+
+**Env vars:**
+```bash
+TELEGRAM_BOT_TOKEN=
+SUPERVISOR_TELEGRAM_ID=
+```
+
+**XGBoost model file:** `models/risk_model.json` — train with synthetic data before demo
+
+---
+
+### U6: PHC Supervisor Dashboard
+
+**What to build:**
+1. `apps/o2_backend/routers/dashboard.py` — Flask HTML dashboard
+2. `apps/o2_backend/routers/summary.py` — aggregate stats endpoints
+3. `templates/supervisor_dashboard.html` — HTML/JS dashboard (single file, no frontend framework needed)
+4. `apps/o2_backend/services/ml_risk_scorer.py` — already exists from U5
+
+**Files to create/modify:**
+- `apps/o2_backend/routers/dashboard.py` (new)
+- `apps/o2_backend/routers/summary.py` (new)
+- `templates/supervisor_dashboard.html` (new)
+- `apps/o2_backend/main.py` (update — register dashboard routes)
+
+**Code contracts:**
+
+```python
+# apps/o2_backend/routers/dashboard.py
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse
+import os
+
+router = APIRouter()
+
+@router.get("/dashboard", response_class=HTMLResponse)
+async def supervisor_dashboard():
+    with open("templates/supervisor_dashboard.html") as f:
+        return f.read()
+
+@router.get("/api/summary")
+async def get_summary(phc_id: str):
+    patients = await db.patients.fetchall(
+        "WHERE phc_id = ?", (phc_id,)
+    )
+    high_risk = [p for p in patients if p.get("risk_level") == "HIGH"]
+    medium_risk = [p for p in patients if p.get("risk_level") == "MEDIUM"]
+    
+    return {
+        "total_patients": len(patients),
+        "high_risk": len(high_risk),
+        "medium_risk": len(medium_risk),
+        "low_risk": len(patients) - len(high_risk) - len(medium_risk),
+        "recent_visits": await db.visits.fetchall(
+            "WHERE recorded_at > datetime('now', '-7 days')"
+        ),
+        "scheduled_follow_ups": await db.visit_schedules.fetchall(
+            "WHERE scheduled_at > datetime('now') AND status = 'pending'"
+        )
+    }
+
+@router.get("/api/patients/high-risk")
+async def get_high_risk_patients(phc_id: str):
+    return await db.patients.fetchall(
+        "WHERE phc_id = ? AND risk_level = 'HIGH'", (phc_id,)
+    )
+```
+
+```html
+<!-- templates/supervisor_dashboard.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>PHC Supervisor Dashboard — O2 Platform</title>
+  <meta charset="utf-8">
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 40px; background: #f5f5f5; }
+    .card { background: white; border-radius: 12px; padding: 24px; margin: 16px 0; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+    .metric { display: inline-block; margin: 16px 32px; }
+    .metric-value { font-size: 48px; font-weight: 700; }
+    .metric-label { font-size: 14px; color: #666; text-transform: uppercase; }
+    .high-risk { color: #dc2626; }
+    .medium-risk { color: #f59e0b; }
+    .low-risk { color: #16a34a; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #fafafa; }
+  </style>
+</head>
+<body>
+  <h1>📊 PHC Supervisor Dashboard</h1>
+  <div id="summary"></div>
+  <div id="high-risk-list"></div>
+  <script>
+    async function loadDashboard() {
+      const resp = await fetch('/api/summary?phc_id=PHC001');
+      const data = await resp.json();
+      
+      document.getElementById('summary').innerHTML = `
+        <div class="card">
+          <div class="metric">
+            <div class="metric-value">${data.total_patients}</div>
+            <div class="metric-label">Total Patients</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value high-risk">${data.high_risk}</div>
+            <div class="metric-label">High Risk</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value medium-risk">${data.medium_risk}</div>
+            <div class="metric-label">Medium Risk</div>
+          </div>
+          <div class="metric">
+            <div class="metric-value low-risk">${data.low_risk}</div>
+            <div class="metric-label">Low Risk</div>
+          </div>
+        </div>
+      `;
+      
+      const patients = await fetch('/api/patients/high-risk?phc_id=PHC001').then(r => r.json());
+      document.getElementById('high-risk-list').innerHTML = `
+        <div class="card">
+          <h2>🚨 High Risk Patients</h2>
+          <table>
+            <tr><th>Name</th><th>ABHA</th><th>Risk</th><th>Last Visit</th></tr>
+            ${patients.map(p => `<tr><td>${p.name}</td><td>${p.abha_number}</td><td>${p.risk_level}</td><td>${p.last_visit || 'N/A'}</td></tr>`).join('')}
+          </table>
+        </div>
+      `;
+    }
+    loadDashboard();
+  </script>
+</body>
+</html>
+```
+
+**Env vars:**
+```bash
+SUPERVISOR_DASHBOARD_PORT=8080
+SUPERVISOR_PHC_ID=PHC001  # for demo, single PHC
+```
+
+**Access:** `http://localhost:8080/dashboard` in browser
+
+---
+
+## SQLite Setup (Demo Database)
+
+```python
+# apps/o2_backend/services/database.py
+import aiosqlite, os
+
+DB_PATH = os.getenv("DB_PATH", "o2_platform.db")
+
+async def init_db():
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.executescript("""
+            CREATE TABLE IF NOT EXISTS patients (
+                id TEXT PRIMARY KEY,
+                abha_number TEXT UNIQUE NOT NULL,
+                name TEXT NOT NULL,
+                phone TEXT,
+                emergency_contact TEXT,
+                emergency_contact_phone TEXT,
+                chw_telegram_id TEXT,
+                emergency_contact_telegram TEXT,
+                phc_id TEXT NOT NULL,
+                risk_level TEXT DEFAULT 'LOW',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_patients_abha ON patients(abha_number);
+            CREATE INDEX IF NOT EXISTS idx_patients_phc ON patients(phc_id);
+            
+            CREATE TABLE IF NOT EXISTS vitals (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                systolic_bp INTEGER,
+                diastolic_bp INTEGER,
+                heart_rate INTEGER,
+                spo2 INTEGER,
+                temperature REAL,
+                recorded_at TEXT DEFAULT (datetime('now'))
+            );
+            
+            CREATE TABLE IF NOT EXISTS visits (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                latitude REAL NOT NULL,
+                longitude REAL NOT NULL,
+                chw_id TEXT NOT NULL,
+                recorded_at TEXT DEFAULT (datetime('now')),
+                sync_status TEXT DEFAULT 'synced'
+            );
+            CREATE INDEX IF NOT EXISTS idx_visits_patient ON visits(patient_id);
+            
+            CREATE TABLE IF NOT EXISTS visit_schedules (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                scheduled_at TEXT NOT NULL,
+                status TEXT DEFAULT 'pending',
+                auto_generated INTEGER DEFAULT 1
+            );
+            
+            CREATE TABLE IF NOT EXISTS ivr_transcripts (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                audio_path TEXT,
+                transcript_text TEXT,
+                language TEXT DEFAULT 'kn',
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+            
+            CREATE TABLE IF NOT EXISTS ml_risk_scores (
+                id TEXT PRIMARY KEY,
+                patient_id TEXT NOT NULL,
+                ml_probability REAL,
+                rule_based_level TEXT,
+                ml_level TEXT,
+                features_json TEXT,
+                outcome_label TEXT,
+                created_at TEXT DEFAULT (datetime('now'))
+            );
+        """)
+```
+
+---
+
+## Dependencies (Updated)
+
+**Python (apps/o2_backend/requirements.txt):**
+```
+fastapi==0.115.0
+uvicorn[standard]==0.30.0
+pydantic==2.9.0
+fhir.resources==7.1.0
+aiosqlite==0.20.0
+requests==2.32.0
+xgboost==2.1.0
+python-telegram-bot==21.0.0
+```
+
+**Flutter (apps/o2_app/pubspec.yaml):**
+```yaml
+dependencies:
+  geolocator: ^13.0.0
+  permission_handler: ^11.3.0
+  http: ^1.2.0
+  # existing: brick, flutter_bloc, etc.
+```
+
+**IVR backend (ivr_backend/requirements.txt):**
+```
+fastapi==0.115.0
+uvicorn==0.30.0
+requests==2.32.0
+twilio==9.0.0
+```
+
+**One-time setup commands:**
+```bash
+# 1. Clone repo and setup venv
+cd /home/syed/dev/AAVISHKAR-PRAVAH
+python3 -m venv venv
+source venv/bin/activate
+pip install -r apps/o2_backend/requirements.txt
+
+# 2. Pull IndicTrans2 Docker
+docker pull aiforskill/indictrans2:latest
+docker run -d -p 8000:8000 --name indictrans aiforskill/indictrans2:latest
+
+# 3. Setup Telegram bot
+# Message @BotFather → /newbot → get token
+# Create channel → add bot as admin → get channel ID
+
+# 4. Initialize SQLite DB
+cd apps/o2_backend
+python -c "import asyncio; from services.database import init_db; asyncio.run(init_db())"
+
+# 5. Train initial XGBoost model with synthetic data
+python -c "from services.ml_risk_scorer import XGBoostRiskScorer; import json, numpy as np; m=XGBoostRiskScorer(); m.model.fit(np.random.rand(100,9), np.random.randint(0,2,100)); m.model.save_model('models/risk_model.json')"
+
+# 6. Start backend
+uvicorn main:app --reload --port 8000
+
+# 7. Start IVR backend
+cd /home/syed/dev/AAVISHKAR-PRAVAH/ivr_backend
+uvicorn main:app --reload --port 8001
+
+# 8. Run Flutter app
+cd /home/syed/dev/AAVISHKAR-PRAVAH/apps/o2_app
+flutter run
+```
+
+---
+
+## Execution Order
+
+1. **U1** (ABHA generator) — foundation for patient registration
+2. **U3** (GPS + auto-schedule) — immediate value for CHW workflow
+3. **U5** (XGBoost ML + alerts) — core clinical logic
+4. **U2** (IndicTrans2) — voice pipeline
+5. **U4** (IVR transcription) — uses U2
+6. **U6** (Supervisor dashboard) — last, needs all data populated
+
+---
+
+*Plan generated: 2026-05-11*
+*API pivot applied: NHA unavailable → local ABHA, Bhashini blocked → IndicTrans2, Twilio problematic → Telegram*
