@@ -1,0 +1,29 @@
+feat(o2): phase 1 MVP
+
+Implements 6 units for the O2 Platform maternal healthcare monitoring system:
+
+Flutter App (U1):
+- Brick ORM + SQLCipher offline-first with AES-256 encryption
+- Android Keystore-backed key management
+- WorkManager sync (WiFi + Charging only)
+- FHIR R4 models: Patient, Observation (Vitals), DocumentReference (SBAR)
+- Traffic-light risk triage using WHO maternal health thresholds
+- ABDM mock with Mod 97 ABHA checksum validation
+- Bhashini STT/TTS stubs in constants
+
+Supabase (U2):
+- Schema: phc_hierarchy, chw_assignments, patients, vitals_logs, clinical_contact_logs, sbar_documents
+- PHC-based RLS isolation via get_user_phc_ids() helper
+
+FastAPI Backend (U3):
+- POST /risk — traffic-light triage from vitals input
+- POST /sbar — LLM-generated SBAR clinical summary with JSON schema enforcement
+
+IVR Backend (U4):
+- Twilio webhook handlers for missed-call to callback to voice recording to WhatsApp
+- Patient lookup by caller ID
+- Emergency keyword detection (EN/KN/HI)
+
+Documentation:
+- docs/solutions/o2-platform-phase1-mvp.md — architectural decisions and file inventory
+- STRATEGY.md, docs/plans/, docs/ideation/, docs/brainstorms/ — full product documentation

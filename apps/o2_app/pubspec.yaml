@@ -1,0 +1,71 @@
+name: o2_app
+description: O2 Platform — Offline-first maternal healthcare monitoring for Community Health Workers
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # State Management
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+  
+  # Offline-First ORM with Supabase sync
+  brick_offline_first_with_supabase: ^2.1.0
+  brick_supabase: ^2.0.0
+  
+  # Local Database
+  sqflite_sqlcipher: ^3.1.0+1
+  sqflite: ^2.3.3+1
+  
+  # Encryption
+  flutter_secure_storage: ^9.2.2
+  
+  # Background Sync
+  workmanager: ^0.5.2
+  
+  # FHIR R4 support
+  fhir: ^0.6.0
+  fhir_r4: ^0.6.0
+  
+  # HTTP Client
+  http: ^1.2.2
+  supabase_flutter: ^2.6.0
+  
+  # Utilities
+  uuid: ^4.5.1
+  intl: ^0.19.0
+  shared_preferences: ^2.3.2
+  path_provider: ^2.1.4
+  connectivity_plus: ^6.0.5
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+  
+  # Voice I/O
+  record: ^5.1.2
+  audioplayers: ^6.1.0
+  
+  # Push Notifications
+  firebase_messaging: ^15.1.3
+  flutter_local_notifications: ^17.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  build_runner: ^2.4.13
+  riverpod_generator: ^2.4.3
+  freezed: ^2.5.7
+  json_serializable: ^6.8.0
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+  
+  assets:
+    - assets/voices/
+    - assets/icons/

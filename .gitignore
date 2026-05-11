@@ -1,0 +1,70 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+*.lock
+pubspec.lock
+
+# Android
+android/.gradle/
+android/app/build/
+android/.idea/
+*.iml
+
+# iOS
+ios/Pods/
+ios/build/
+*.xcworkspace
+
+# Supabase
+.supabase/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+.Python
+env/
+
+# IVR Backend
+ivr_backend/venv/
+ivr_backend/env/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Credentials / secrets
+*.pem
+*.key
+credentials.json
+service-account.json
+
+# SQL migrations (keep schema files, ignore auto-generated)
+supabase/.temp/
+supabase/migrations/
+
+# FastAPI
+apps/o2_backend/.env
+apps/o2_backend/__pycache__/
+
+# Build artifacts
+dist/
+out/
