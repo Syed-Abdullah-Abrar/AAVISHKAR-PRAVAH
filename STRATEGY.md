@@ -71,6 +71,16 @@ A zero-cost, zero-app communication bridge for pregnant women with basic feature
 | **Ecosystem** | ABDM — data contract defined; live API integration in Phase 2 | 2 |
 | **ML Risk Model** | Quantized XGBoost — shadow mode in Phase 2, on-device in Phase 3 | 2 |
 
+### External APIs
+
+| API | Base URL | Auth | Rate Limit | Phase |
+|-----|----------|------|------------|-------|
+| **NHA / ABDM** | `https://.abdm.gov.in/api/v1` | HMAC-SHA256 | 100/min | 2 |
+| **Bhashini STT/TTS** | `https://meity-auth.ulcacetech.in/api/v3` | JWT Bearer | 60/min STT | 2 |
+| **Twilio SMS/WhatsApp** | `https://api.twilio.com/2010-04-01` | Basic Auth | Varies | 1+ |
+| **XGBoost ONNX** | Local inference | None | N/A | 2 |
+| **Firebase FCM** | `https://fcm.googleapis.com/fcm/send` | FCM server key | Varies | 2 |
+
 ---
 
 ## 5. Core Product Tracks

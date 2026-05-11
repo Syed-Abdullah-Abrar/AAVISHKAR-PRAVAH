@@ -2,20 +2,211 @@
 
 **Date:** 2026-05-11  
 **Phase:** 2 (Pilot-Ready Integration)  
-**Status:** Brainstormed — ready for planning  
+**Status:** Requirements — ready for planning  
 **Based on:** `docs/ideation/O2-Platform-Phase2-ideation.md`
 
 ---
 
-## Overview
+## External API Inventory
 
-Phase 2 upgrades Phase 1 mocks/stubs to live integrations, adds ML-based risk scoring in shadow mode, builds the voice transcription pipeline, and introduces the PHC supervisor dashboard for pilot operations.
+### 1. NHA / ABDM API
 
-**Principle:** No speculative complexity. Every feature must work offline-first or degrade gracefully. Live API calls are reserved for operations that genuinely require network (ABDM verification, Bhashini STT/TTS).
+**Base URL (Sandbox):** `https://.abdm.gov.in/api/v1`  
+**Production URL:** `https://healthidsbx.abdm.gov.in/api/v1`  
+**Auth:** HMAC-SHA256 signature with API key + secret, passed as headers
+
+**Key Endpoints:**
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/abd-v1/discovery/verify-abha` | POST | Verify ABHA number exists |
+| `/abd-v1/hpr/search-by-name` | GET | Search health professional by name |
+| `/abd-v1/hfr/search` | GET | Search health facility by ID |
+| `/abd-v1/consent` | POST | Request patient consent |
+| `/abd-v1/health-information/hip/on-share` | POST | Receive health records |
+
+**Headers required:**
+```
+Content-Type: application/json
+clientId: <API_KEY>
+clientSecret: <API_SECRET>
+HMAC-SHA256: <signature>
+timestamp: <ISO8601>
+```
+
+**Request body (ABHA verify):**
+```json
+{
+  "healthId": "12-3456-7890-1234"
+}
+```
+
+**Response:**
+```json
+{
+  "healthIdNumber": "12-3456-7890-1234",
+  "healthId": "john.doe@abdm",
+  "name": "John Doe",
+  "gender": "M",
+  "dateOfBirth": "1990-01-15",
+  "mobile": "9876543210",
+  "verified": true,
+  "status": "ACTIVE"
+}
+```
+
+**Credentials:** Apply at https://abdm.gov.in/developers  
+**Rate limit:** 100 requests/minute (sandbox), 1000/minute (production)
 
 ---
 
-## Feature 1: Live ABDM / NHA API Integration
+### 2. Bhashini API v3
+
+**Base URL:** `https://meity-auth.ulcacetech.in/api/v3`  
+**Auth:** JWT Bearer token, obtained via client credentials grant
+
+**Token endpoint:**
+```
+POST https://auth.ulcacetech.in/api/v1/telemetry
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials
+&client_id=<BHASHINI_CLIENT_ID>
+&client_secret=<BHASHINI_CLIENT_SECRET>
+```
+
+**Returns:**
+```json
+{
+  "access_token": "<JWT>",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}
+```
+
+**Key Endpoints:**
+
+| Endpoint | Method | Purpose | Lang Codes |
+|----------|--------|---------|------------|
+| `/asr` | POST | Speech-to-text | `kn` (Kannada), `hi` (Hindi) |
+| `/tts` | POST | Text-to-speech | `kn`, `hi` |
+| `/translation/v2` | POST | Translate text | `kn→en`, `hi→en` |
+| `/detectLang` | POST | Detect language | auto-detect |
+
+**STT Request (`/asr`):**
+```json
+{
+  "audioSource": "byte",
+  "inputLanguage": "kn",
+  "fileType": "wav",
+  "model": "medium",
+  "purpose": "healthcare"
+}
+```
+Audio sent as multipart/form-data binary.
+
+**STT Response:**
+```json
+{
+  "text": "ರಕ್ತದೊತ್ತಡ 140/90",
+  "confidence": 0.94,
+  "language": "kn"
+}
+```
+
+**TTS Request (`/tts`):**
+```json
+{
+  "inputText": "BP is elevated at 150 over 95. Please schedule a visit within 24 hours.",
+  "inputLanguage": "kn",
+  "gender": "female",
+  "model": "medium",
+  "purpose": "healthcare"
+}
+```
+
+**TTS Response:** Binary audio/wav
+
+**Language codes:** `kn` (Kannada), `hi` (Hindi), `en` (English)  
+**Credentials:** Self-service at https://bhashini.gov.in  
+**Rate limit:** 60 requests/minute (STT), 30 requests/minute (TTS)
+
+---
+
+### 3. Twilio (Programmable SMS + WhatsApp)
+
+**Base URL:** `https://api.twilio.com/2010-04-01`  
+**Auth:** `AC<AccountSID>:<AuthToken>` (Basic Auth)
+
+**Key Endpoints:**
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/Accounts/{AccountSid}/Messages.json` | POST | Send SMS or WhatsApp |
+| `/Accounts/{AccountSid}/Calls.json` | POST | Initiate call (callback) |
+
+**SMS Request:**
+```
+POST /2010-04-01/Accounts/<AC_SID>/Messages.json
+Content-Type: application/x-www-form-urlencoded
+
+To=+919876543210
+From=+14155551234
+Body=Patient+P001+EMERGENCY+BP+160+100.+Refer+to+PHC+immediately.
+```
+
+**WhatsApp Request:** Same as SMS, `From=whatsapp:+14155551234`, `To=whatsapp:+919876543210`
+
+**Callbacks:** Set webhook URL in Twilio console for `POST /twilio/missed-call` and `POST /twilio/voice-recording`  
+**Credentials:** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN` from console.twilio.com
+
+---
+
+### 4. XGBoost Quantized ML Model
+
+**Format:** ONNX quantized model (`.onnx`) for cross-platform inference  
+**Training:** Python `xgboost`, exported to ONNX via `onnxmltools`  
+**Inference runtime:** `onnxruntime` (Python) or `onnxruntime_mobile` (Dart/Flutter on-device)
+
+**Model input features (9 features):**
+```
+systolic_bp, diastolic_bp, hemoglobin, weight_kg,
+weeks_pregnant, temperature_c, fetal_heart_rate,
+previous_complications_count, missed_call_frequency
+```
+
+**Model output:** Risk probability (0.0 - 1.0)  
+**Quantization:** Dynamic int16 quantization for ~90% size reduction  
+**Approximate model size:** 500KB quantized
+
+**Training pipeline:**
+```python
+import xgboost as xgb
+from onnxmltools import convert_xgboost
+
+# Train on Phase 1 historical data
+model = xgb.XGBClassifier(
+    objective='binary:logistic',
+    max_depth=4,
+    n_estimators=100,
+    learning_rate=0.1,
+    scale_pos_weight=3  # emergency cases are rare
+)
+model.fit(X_train, y_train)
+
+# Convert to ONNX
+onnx_model = convert_xgboost(model, initial_types=[('input', FloatTensorType([1, 9]))]
+with open('risk_model.onnx', 'wb') as f:
+    f.write(onnx_model.SerializeToString())
+```
+
+**Labels:** Outcome of clinical contact: `0` = safe delivery, `1` = complication/referral  
+**Minimum training samples:** 500 patient-months  
+**Retrain trigger:** 200 new labeled outcomes accumulated
+
+---
+
+## Feature 1: Live ABDM/NHA API Integration
 
 ### What
 
@@ -24,29 +215,71 @@ Replace the Mod 97 checksum stub in `abdm_service.dart` with live NHA API calls.
 ### User Flow
 
 1. CHW enters patient's ABHA number during registration
-2. App calls NHA API (via backend proxy to protect credentials)
-3. API returns: verified/not found/error
-4. If verified → patient linked to national health record
-5. If not found → CHW prompted to correct or skip ABHA linking
-6. If error → retry with exponential backoff; patient can proceed without ABHA link
+2. App calls NHA API via FastAPI proxy (`POST /abdm/verify`)
+3. API proxies to NHA sandbox: `POST https://.abdm.gov.in/api/v1/abd-v1/discovery/verify-abha`
+4. NHA returns: verified/not found/error with name + DOB
+5. If verified → patient linked to national health record, name/DOB auto-filled
+6. If not found → CHW prompted to correct or skip ABHA linking
+7. If error → retry with exponential backoff (3 attempts, 2s/4s/8s); patient can proceed without ABHA link
 
-### Key Decisions
+### API Contract
 
-| Decision | Choice | Rationale |
-|----------|--------|----------|
-| Call from backend, not app | NHA API proxied through FastAPI | Protects API keys; easier credential management |
-| Abort or warn on failure? | Warn + allow skip | Network failures shouldn't block patient registration |
-| Offline behavior | Cache last-known ABHA verification result for 24h | Handle brief connectivity loss |
+**Flutter → FastAPI:**
+```dart
+// apps/o2_app/lib/abdm/abdm_service.dart
+Future<AbdmVerifyResult> verifyAbha(String abhaNumber) async {
+  final response = await dio.post(
+    'https://api.o2.example.com/abdm/verify',
+    data: {'healthId': abhaNumber}
+  );
+  return AbdmVerifyResult.fromJson(response.data);
+}
+```
 
-### Scope Boundaries
+**FastAPI endpoint:**
+```python
+# apps/o2_backend/routers/abdm.py
+@router.post("/abdm/verify")
+async def verify_abha(request: AbdmVerifyRequest) -> AbdmVerifyResponse:
+    # HMAC-signed call to NHA sandbox
+    headers = {
+        "clientId": os.getenv("NHA_CLIENT_ID"),
+        "clientSecret": os.getenv("NHA_CLIENT_SECRET"),
+        "timestamp": datetime.utcnow().isoformat(),
+        "HMAC-SHA256": compute_hmac(request.healthId),
+        "Content-Type": "application/json"
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://.abdm.gov.in/api/v1/abd-v1/discovery/verify-abha",
+            json={"healthId": request.healthId},
+            headers=headers,
+            timeout=10.0
+        )
+    return AbdmVerifyResponse.from_nha(resp.json())
+```
 
-- **In scope:** ABHA ID verification, HPR (Health Professional Registry) lookup for CHW
-- **Deferred:** Full ABDM consent flow, HIU (Health Information User) certification, national health record retrieval
+### Supabase Schema Addition
+
+```sql
+-- 24h cache to avoid redundant calls
+CREATE TABLE abha_verification_cache (
+    abha_number TEXT PRIMARY KEY,
+    name TEXT,
+    dob TEXT,
+    gender TEXT,
+    verified BOOLEAN,
+    fetched_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ DEFAULT NOW() + INTERVAL '24 hours'
+);
+
+CREATE INDEX idx_abha_cache_expires ON abha_verification_cache(expires_at);
+```
 
 ### Success Criteria
 
 - ≥95% of patient registrations complete ABHA verification within 10 seconds on 3G
-- ≥99% uptime for ABDM API proxy (handled by cloud provider SLA)
+- ≥99% uptime for ABDM API proxy (cloud SLA)
 
 ---
 
@@ -54,39 +287,95 @@ Replace the Mod 97 checksum stub in `abdm_service.dart` with live NHA API calls.
 
 ### What
 
-Replace stubs in `lib/core/constants.dart` (`sttLanguageCode`, `ttsLanguageCode`) with live Bhashini API v3 calls. CHWs and patients use voice input/output in Kannada and Hindi.
+Replace stubs in `lib/core/constants.dart` with live Bhashini API v3 calls. CHWs and patients use voice input/output in Kannada and Hindi.
 
-### User Flows
+### API Contract
 
-**CHW Voice Input (STT):**
-1. CHW taps microphone on patient form
-2. App streams audio to Bhashini STT API (chunked for stability)
-3. Bhashini returns text in selected language
-4. App fills form field with transcribed text
+**Bhashini STT:**
+```dart
+// apps/o2_app/lib/services/bhashini_stt_service.dart
+class BhashiniSttService {
+  Future<String> transcribe(File audioFile, String languageCode) async {
+    final token = await _getAccessToken();
+    final formData = FormData.fromMap({
+      'audioSource': 'byte',
+      'inputLanguage': languageCode,  // 'kn' or 'hi'
+      'fileType': 'wav',
+      'model': 'medium',
+      'purpose': 'healthcare',
+    });
+    formData.files.add(MapEntry('audioFile', 
+        MultipartFile.fromFileSync(audioFile.path)));
+    
+    final response = await dio.post(
+      'https://meity-auth.ulcacetech.in/api/v3/asr',
+      data: formData,
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
+    return BhashiniSttResponse.fromJson(response.data).text;
+  }
+}
+```
 
-**Patient Voice Output (TTS):**
-1. App fetches content (risk summary, follow-up instructions)
-2. Sends to Bhashini TTS API in patient's preferred language
-3. Receives audio stream
-4. Plays via device speaker
+**Bhashini TTS:**
+```dart
+// apps/o2_app/lib/services/bhashini_tts_service.dart
+class BhashiniTtsService {
+  Future<Uint8List> synthesize(String text, String languageCode) async {
+    final token = await _getAccessToken();
+    final response = await dio.post(
+      'https://meity-auth.ulcacetech.in/api/v3/tts',
+      data: {
+        'inputText': text,
+        'inputLanguage': languageCode,
+        'gender': 'female',
+        'model': 'medium',
+        'purpose': 'healthcare',
+      },
+      options: Options(
+        headers: {'Authorization': 'Bearer $token'},
+        responseType: ResponseType.bytes,
+      ),
+    );
+    return Uint8List.fromList(response.data);
+  }
+}
+```
+
+**Backend Bhashini proxy (for IVR):**
+```python
+# apps/o2_backend/routers/bhashini.py
+@router.post("/bhashini/stt")
+async def speech_to_text(audio_url: str, language: str) -> dict:
+    token = await get_bhashini_token()
+    audio_data = await download_audio(audio_url)  # Twilio recording URL
+    files = {'audioFile': ('recording.wav', audio_data, 'audio/wav')}
+    data = {
+        'audioSource': 'byte',
+        'inputLanguage': language,
+        'fileType': 'wav',
+        'model': 'medium',
+        'purpose': 'healthcare'
+    }
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            BHASHINI_STT_URL,
+            data=data,
+            files=files,
+            headers={'Authorization': f'Bearer {token}'},
+            timeout=30.0
+        )
+    return {"text": resp.json()["text"], "confidence": resp.json()["confidence"]}
+```
 
 ### Key Decisions
 
 | Decision | Choice | Rationale |
 |---------|--------|-----------|
-| Streaming or recording-then-upload? | Chunked streaming for STT, pre-recorded TTS | Rural bandwidth varies; chunks recover from failure |
-| Fallback when offline | Show text-only; queue TTS requests | Bhashini requires network; no offline TTS possible |
-| Language selection | Per-user preference stored in Supabase, synced | CHW selects Kannada or Hindi at first launch |
-
-### Scope Boundaries
-
-- **In scope:** STT for CHW form entry, TTS for patient-facing instructions
-- **Deferred:** Bhashini Indic-2 Indic translation (Kannada↔Hindi direct only)
-
-### Success Criteria
-
-- STT accuracy ≥85% for Kannada and Hindi (Bhashini benchmark)
-- TTS latency ≤3s for standard messages on 3G
+| Audio chunking | ≤60s per chunk | Bhashini limit; long recordings split |
+| TTS caching | Cache common messages | 3s latency on 3G; pre-generate risk summaries |
+| Token refresh | Proactive refresh at 55min | Tokens expire at 60min |
+| Fallback | Text-only when offline | Bhashini needs network |
 
 ---
 
@@ -94,27 +383,28 @@ Replace stubs in `lib/core/constants.dart` (`sttLanguageCode`, `ttsLanguageCode`
 
 ### What
 
-When `/risk` returns a triage result, the app automatically creates a follow-up visit entry in the CHW's schedule — no manual date entry required.
+When `/risk` returns a triage result, the app automatically creates a follow-up visit entry — no manual date entry required.
 
-### User Flow
+### Default Intervals
 
-1. CHW submits vitals → `/risk` returns HIGH
-2. App shows risk result + auto-creates follow-up in 24h
-3. CHW sees "Follow-up scheduled: tomorrow, 9 AM" banner
-4. CHW can accept, modify, or cancel the auto-scheduled visit
-5. Scheduled visit syncs to Supabase with PHC visibility
+| Risk Level | Default Follow-Up |
+|------------|-----------------|
+| EMERGENCY | Immediate (same day, urgent flag) |
+| HIGH | 24 hours |
+| MEDIUM | 48 hours |
+| LOW | 7 days |
 
-### Key Decisions
+### Supabase Schema Addition
 
-| Decision | Choice | Rationale |
-|---------|--------|-----------|
-| Default intervals | EMERGENCY → immediate, HIGH → 24h, MEDIUM → 48h, LOW → 7 days | From WHO maternal health protocols |
-| CHW override | Always allowed | CHW has local knowledge; don't hard-block |
-| Sync | Follows same WorkManager WiFi + charging constraints | No new network demand |
+```sql
+ALTER TABLE clinical_contact_logs ADD COLUMN scheduled_follow_up TIMESTAMPTZ;
+ALTER TABLE clinical_contact_logs ADD COLUMN follow_up_source TEXT DEFAULT 'manual';
+-- follow_up_source: 'manual' | 'auto_from_risk'
+```
 
 ### Success Criteria
 
-- ≥80% of HIGH/EMERGENCY cases have a scheduled follow-up within the protocol interval
+- ≥80% of HIGH/EMERGENCY cases have a scheduled follow-up within protocol interval
 - Zero additional taps required from CHW after submitting vitals
 
 ---
@@ -123,33 +413,44 @@ When `/risk` returns a triage result, the app automatically creates a follow-up 
 
 ### What
 
-Twilio-recorded voice messages from feature-phone patients are transcribed via Bhashini STT. Transcription enables: (a) WhatsApp text summary to CHW, (b) searchable clinical notes, (c) keyword alerting.
+Twilio-recorded voice messages are transcribed via Bhashini STT. Transcript sent as WhatsApp text summary to CHW alongside the audio.
 
 ### Data Flow
 
 ```
-Patient voice message (Twilio recording)
+Twilio records audio → webhook POST /twilio/voice-recording {RecordingUrl}
     ↓
-IVR Backend receives recording URL
+IVR backend downloads audio from RecordingUrl
     ↓
-Audio pushed to Bhashini STT API
+Audio → Bhashini STT API (via FastAPI proxy)
     ↓
 Transcript returned in patient's language
     ↓
-Transcript stored in Supabase (searchable notes)
+Transcript stored in Supabase voice_transcripts table
     ↓
-WhatsApp text message sent to CHW (short summary)
+WhatsApp text message: "P001: 'BP problem' — 14:30, 28 May"
     ↓
-If emergency keywords detected → emergency alert triggered
+If emergency keywords in transcript → trigger emergency alert
 ```
 
-### Key Decisions
+### Supabase Schema Addition
 
-| Decision | Choice | Rationale |
-|---------|--------|-----------|
-| Transcription language detection | Detect from patient's ABHA record language preference | No ambiguity |
-| Chunking for long recordings | >60s audio split before sending to Bhashini | Bhashini has 60s limit |
-| Fallback on STT failure | Send audio-only WhatsApp to CHW (Phase 1 behavior) | Degrade gracefully |
+```sql
+CREATE TABLE voice_transcripts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    patient_id TEXT NOT NULL REFERENCES patients(id),
+    recording_url TEXT NOT NULL,
+    transcript_text TEXT,
+    transcript_language TEXT,
+    confidence_score FLOAT,
+    is_emergency BOOLEAN DEFAULT FALSE,
+    whatsapp_summary_sent BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_transcripts_patient ON voice_transcripts(patient_id);
+CREATE INDEX idx_transcripts_emergency ON voice_transcripts(is_emergency) WHERE is_emergency = TRUE;
+```
 
 ### Success Criteria
 
@@ -162,30 +463,50 @@ If emergency keywords detected → emergency alert triggered
 
 ### What
 
-When `/risk` returns EMERGENCY, the alert is simultaneously sent to: CHW (WhatsApp), PHC Supervisor (SMS + app push), patient's emergency contact (SMS).
+When `/risk` returns EMERGENCY, alert is simultaneously sent to: CHW (WhatsApp), PHC Supervisor (SMS + app push), patient's emergency contact (SMS).
 
-### User Flow
+### Alert Message Format
 
-1. Vitals submitted → `/risk` returns EMERGENCY
-2. App triggers alert job (queued for offline resilience)
-3. Alert sent to all three recipients simultaneously
-4. Each recipient receives appropriate format:
-   - CHW: WhatsApp text + deep link to patient record
-   - Supervisor: SMS + app notification badge
-   - Emergency contact: SMS with patient ID + nearest PHC address
+**CHW (WhatsApp):**
+```
+🚨 EMERGENCY: P001 — Lakshmi, 28 weeks pregnant
+BP: 170/110 | Hemoglobin: 6.5 g/dL
+Village: Byadarahalli | PHC: Harohalli
+Open app: https://o2.app/patient/P001
+```
 
-### Key Decisions
+**Supervisor (SMS):**
+```
+O2 EMERGENCY: P001 (Lakshmi) BP 170/110 Hb 6.5 at Byadarahalli PHC. CHW: Radha. https://o2.app/supervisor/P001
+```
 
-| Decision | Choice | Rationale |
-|---------|--------|-----------|
-| Recipients | CHW, PHC supervisor (from PHC hierarchy), emergency contact (from patient record) | Configurable; supervisor comes from `phc_hierarchy` |
-| Offline behavior | Queue alert job; deliver when WorkManager sync fires | Works offline; no new network dependency |
-| Delivery confirmation | Log delivery status per recipient in Supabase | Audit trail for clinical safety |
+**Emergency Contact (SMS):**
+```
+Your family member Lakshmi needs urgent medical attention. Nearest PHC: Harohalli PHC, 3km. Ambulance: 108.
+```
+
+### Supabase Schema Addition
+
+```sql
+CREATE TABLE emergency_alert_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    patient_id TEXT NOT NULL,
+    risk_level TEXT NOT NULL,
+    chw_notified BOOLEAN DEFAULT FALSE,
+    chw_notified_at TIMESTAMPTZ,
+    supervisor_notified BOOLEAN DEFAULT FALSE,
+    supervisor_notified_at TIMESTAMPTZ,
+    emergency_contact_notified BOOLEAN DEFAULT FALSE,
+    emergency_contact_notified_at TIMESTAMPTZ,
+    failure_reason TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
 
 ### Success Criteria
 
 - All three recipients receive alert within 60 seconds of EMERGENCY detection
-- ≥99% delivery success rate to at least one channel per recipient
+- ≥99% delivery success to at least one channel per recipient
 
 ---
 
@@ -193,29 +514,37 @@ When `/risk` returns EMERGENCY, the alert is simultaneously sent to: CHW (WhatsA
 
 ### What
 
-A web-based dashboard (Flutter web or simple HTML/JS) showing PHC-level aggregate data: HIGH/EMERGENCY patient count, SBAR generation rate, CHW activity, referral tracking.
+A web dashboard (Flutter web or simple HTML/JS) showing PHC-level aggregate data.
 
-### Dashboard Views
+### Dashboard Queries
 
-| View | Metrics |
-|------|---------|
-| Risk Overview | HIGH/EMERGENCY count by village, trend over 7/30 days |
-| CHW Activity | Visits completed today, SBARs generated, patients without follow-up |
-| Referral Tracker | SBARs sent to referral facilities, acknowledgment status |
-| IVR Volume | Missed calls this week, transcriptions completed, unresolved messages |
+```sql
+-- HIGH/EMERGENCY by village (last 7 days)
+SELECT p.village, COUNT(*) as high_risk_count
+FROM patients pa
+JOIN vitals_logs v ON v.patient_id = pa.id
+JOIN clinical_contact_logs c ON c.patient_id = pa.id
+WHERE v.risk_level IN ('HIGH', 'EMERGENCY')
+  AND c.created_at > NOW() - INTERVAL '7 days'
+GROUP BY p.village
+ORDER BY high_risk_count DESC;
 
-### Key Decisions
+-- CHW activity today
+SELECT chw_id, COUNT(*) as visits, 
+       SUM(CASE WHEN sbar_generated THEN 1 ELSE 0 END) as sbars
+FROM clinical_contact_logs
+WHERE DATE(created_at) = CURRENT_DATE
+GROUP BY chw_id;
+```
 
-| Decision | Choice | Rationale |
-|---------|--------|-----------|
-| Technology | Flutter web (reuses Flutter codebase) or simple React/HTML | Pilot scope; no heavy framework needed |
-| Authentication | Supabase Auth with supervisor role | Uses existing auth infrastructure |
-| Data access | Supabase RLS — supervisors see only their PHC's data | Same PHC-based isolation as CHW app |
+### Views
 
-### Success Criteria
-
-- Supervisor can see HIGH/EMERGENCY patient list within 2 taps from dashboard landing
-- Data refreshes within 30 seconds of sync completing
+| View | Description |
+|------|-------------|
+| Risk Overview | HIGH/EMERGENCY by village, 7/30-day trend |
+| CHW Activity | Visits, SBARs, unfollowed patients |
+| IVR Volume | Missed calls, transcriptions, unresolved |
+| Referral Tracker | SBARs sent, acknowledgment status |
 
 ---
 
@@ -223,35 +552,64 @@ A web-based dashboard (Flutter web or simple HTML/JS) showing PHC-level aggregat
 
 ### What
 
-A quantized XGBoost model trained on Phase 1 historical data runs alongside the rule-based WHO thresholds. ML score is displayed but not used for clinical decisions in Phase 2 — shadow mode only.
+Quantized XGBoost model runs alongside rule-based WHO thresholds in shadow mode.
 
-### How It Works
+### Model Input (from Flutter app)
 
+```json
+{
+  "systolic_bp": 155,
+  "diastolic_bp": 98,
+  "hemoglobin": 9.5,
+  "weight_kg": 62,
+  "weeks_pregnant": 28,
+  "temperature_c": 37.2,
+  "fetal_heart_rate": 142,
+  "previous_complications_count": 1,
+  "missed_call_frequency_7d": 2
+}
 ```
-Vitals submitted
-    ↓
-Rule-based /risk returns → shown to CHW (deterministic, explainable)
-    ↓
-ML model score computed (shadow)
-    ↓
-ML score logged to Supabase alongside rule-based result
-    ↓
-Outcome data (delivery safe? referral followed?) retroactively labels training set
+
+### Model Output (logged, not used clinically)
+
+```json
+{
+  "rule_based_level": "HIGH",
+  "rule_based_score": 4,
+  "ml_probability": 0.73,
+  "ml_confidence": 0.82,
+  "model_version": "xgboost-v2-20260511",
+  "training_samples": 1247
+}
 ```
 
-### Key Decisions
+### Supabase Schema Addition
 
-| Decision | Choice | Rationale |
-|---------|--------|-----------|
-| Model type | Quantized XGBoost | Lightweight, runs on modest hardware; interpretable |
-| Training data | Phase 1 vitals + outcome labels from clinical contacts | Outcome labels require manual entry or referral follow-up records |
-| When to activate | After ≥500 patient-months of labeled data | Industry benchmark for quantized GB |
-| Offline behavior | Model runs locally on device (on-device inference) | No network call; protects patient privacy |
+```sql
+CREATE TABLE ml_risk_scores (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    patient_id TEXT NOT NULL,
+    vitals_input JSONB NOT NULL,
+    rule_based_level TEXT NOT NULL,
+    rule_based_score INTEGER NOT NULL,
+    ml_probability FLOAT NOT NULL,
+    ml_confidence FLOAT,
+    model_version TEXT NOT NULL,
+    training_samples INTEGER,
+    outcome_label BOOLEAN,  -- filled later: delivery safe?
+    outcome_labeled_at TIMESTAMPTZ,
+    labeled_by TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_ml_scores_patient ON ml_risk_scores(patient_id);
+CREATE INDEX idx_ml_scores_unlabeled ON ml_risk_scores(outcome_label) WHERE outcome_label IS NULL;
+```
 
 ### Success Criteria
 
-- ML model achieves ≥70% agreement with rule-based triage on validation set
-- Model retraining triggered automatically when 200 new labeled outcomes accumulate
+- ML model ≥70% agreement with rule-based triage on validation set
+- Retraining triggered automatically when 200 new labeled outcomes accumulate
 
 ---
 
@@ -259,23 +617,14 @@ Outcome data (delivery safe? referral followed?) retroactively labels training s
 
 ### What
 
-When CHW opens a patient record in the field, the app automatically captures GPS coordinates and timestamps the visit — creating an auditable home visit trail for NHM (National Health Mission) compliance.
+When CHW opens a patient record, GPS coordinates are automatically captured and stored with the visit.
 
-### User Flow
+### Supabase Schema Addition
 
-1. CHW opens patient record (triggers location capture)
-2. App captures GPS coordinates (accuracy ±30m acceptable; ±5m preferred)
-3. Coordinates stored in `clinical_contact_logs.visit_location`
-4. Sync uploads to Supabase on next WorkManager window
-5. Supervisor dashboard shows visit map view
-
-### Key Decisions
-
-| Decision | Choice | Rationale |
-|---------|--------|-----------|
-| Permission | Request on first launch; explain value clearly | NHM compliance + patient safety |
-| Offline | Store coordinates locally; sync later | Works without network |
-| Accuracy fallback | If GPS unavailable, mark as "location unavailable" | Don't block clinical workflow |
+```sql
+ALTER TABLE clinical_contact_logs ADD COLUMN visit_location JSONB;
+-- JSONB: {"lat": 12.9716, "lng": 77.5946, "accuracy": 15.0, "timestamp": "2026-05-28T09:30:00Z"}
+```
 
 ### Success Criteria
 
@@ -301,10 +650,12 @@ When CHW opens a patient record in the field, the app automatically captures GPS
 
 ## Dependencies
 
-- **Feature 1** (ABDM): Requires NHA sandbox API credentials, data sharing agreement with NHA
-- **Feature 2** (Bhashini): Requires Bhashini API key (self-service at https://bhashini.gov.in)
-- **Feature 7** (ML): Requires Phase 1 outcome labels — CHW or supervisor must mark referral follow-up status
-- **Feature 8** (GPS): Requires Android location permission; pilot CHWs must consent
+- **Feature 1** (ABDM): NHA sandbox credentials at https://abdm.gov.in/developers
+- **Feature 2** (Bhashini): Bhashini API key at https://bhashini.gov.in
+- **Feature 3** (GPS): Android location permission + `geolocator` package
+- **Feature 4** (IVR Transcription): Bhashini STT + Twilio recording webhook
+- **Feature 5** (Emergency): Twilio SMS + supervisor/emergency contact in patient record
+- **Feature 7** (ML): Training data labels from `ml_risk_scores.outcome_label`
 
 ---
 
