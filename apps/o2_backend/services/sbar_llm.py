@@ -81,17 +81,32 @@ class SBARLLMService:
         self._setup_client()
 
     def _setup_client(self):
-        """Initialize the LLM client based on provider."""
+        """Initialize the LLM client based on provider. Gracefully handles missing API keys."""
         if self.provider == "openai":
-            from openai import AsyncOpenAI
-            self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-            self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
+            api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                from openai import AsyncOpenAI
+                self.client = AsyncOpenAI(api_key=api_key)
+                self.model = os.getenv("OPENAI_MODEL", "gpt-4o")
+            else:
+                self.client = None
+                self.model = None
         elif self.provider == "anthropic":
-            import anthropic
-            self.client = anthropic.AsyncAnthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-            self.model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if api_key:
+                import anthropic
+                self.client = anthropic.AsyncAnthropic(api_key=api_key)
+                self.model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+            else:
+                self.client = None
+                self.model = None
         else:
-            raise ValueError(f"Unknown AI provider: {self.provider}")
+            self.client = None
+            self.model = None
+
+    def _is_available(self) -> bool:
+        """Check if LLM client is configured and available."""
+        return self.client is not None
 
     async def generate_sbar(
         self,
@@ -167,6 +182,9 @@ class SBARLLMService:
 
     async def _generate_with_llm(self, user_prompt: str) -> str:
         """Generate text using LLM with strict output control."""
+        # Fallback to mock if no LLM client configured
+        if not self._is_available():
+            return self._mock_sbar_response()
         try:
             if self.provider == "openai":
                 response = await self.client.chat.completions.create(
