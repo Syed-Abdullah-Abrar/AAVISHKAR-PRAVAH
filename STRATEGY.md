@@ -207,32 +207,92 @@ A zero-cost, zero-app communication bridge for pregnant women with basic feature
 
 ---
 
-## 7. What We're Not Building (Yet)
+## 7. Phase 3: End-to-End Wiring + Full UI + Deployment Demo
 
-- On-device quantized LLM (Phase 3)
-- Full ABDM HIU certification (Phase 3+)
-- Indic-2 translation (Kannada↔Hindi) — Bhashini supports direct only
-- Zero-phone patient workflow (separate track)
+**Phase 3 Goal:** Complete the O2 Platform stack from stubs to functional, full Flutter UI for CHW workflows, and working online deployment for hackathon demo.
+
+### Phase 3 Key Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| IVR channel | **Telegram Bot** (not Twilio) | Twilio access problems in Phase 2; Telegram is free, no phone verification, CHWs already have Telegram |
+| Patient communication | Telegram bot voice messages | Patient sends voice via Telegram → STT → Telegram to CHW |
+| IVR adapter | `USE_TWILIO=true` env var | Flip to Twilio when credentials arrive — no code rewrite |
+| Flutter voice | IndicTrans2 HTTP client | Replace Bhashini stubs in `core/constants.dart` |
+| Flutter alerts | Telegram service in-app | CHWs see alerts inside app, not just Telegram |
+| GPS | `geolocator` package | NHM compliance requires GPS-tagged visit logs |
+| Deployment | Railway / Render / Fly.io | Single FastAPI process (AI server + IVR backend merged) |
+
+### Phase 3 Scope
+
+**IVR Backend (ivr_backend/):**
+- `POST /ivr/voice-message` — Telegram voice message → IndicTrans2 STT → SQLite transcript → Telegram alert to CHW
+- Patient lookup by phone → registered patient → initiate Telegram communication
+- Emergency keyword detection on transcribed text → EMERGENCY tier multi-recipient alert
+
+**Flutter App Completeness:**
+- `HomeScreen` — patient count, recent alerts, sync status
+- `PatientListScreen` — filter by risk level
+- `PatientRegistrationScreen` — ABHA generation + patient details
+- `PatientDetailScreen` — vitals history, SBAR, visit log
+- `VitalsEntryScreen` — BP, HR, SpO2, temp, weight, height, gestation weeks
+- `SBARScreen` — display SBAR from `POST /sbar`
+- `VoiceInputScreen` — record → IndicTrans2 STT → display transcript
+- GPS auto-tag on visit log (geolocator → `POST /visits/log`)
+
+**Flutter Service Integrations:**
+- `telegram_service.dart` — receive + send Telegram messages, in-app alerts
+- `indictrans_service.dart` — IndicTrans2 STT/TTS HTTP client (replaces Bhashini stubs)
+- `location_service.dart` — GPS coordinates for NHM compliance
+
+**Backend Deployment:**
+- Merge ivr_backend into FastAPI as `/ivr` router (single process = simpler deployment)
+- Deploy to Railway/Render/Fly.io
+- Configure `MINIMAX_API_KEY`, `TELEGRAM_BOT_TOKEN` env vars
+
+**System Wiring End-to-End:**
+1. CHW logs GPS-tagged vitals in Flutter
+2. FastAPI `/risk` returns traffic-light triage
+3. HIGH/EMERGENCY → Telegram alert to CHW + supervisor
+4. Patient sends voice via Telegram bot
+5. `/ivr/voice-message` → IndicTrans2 STT → transcript stored
+6. Transcript sent to CHW via Telegram
+7. Emergency keywords → EMERGENCY alert fires
+
+### Phase 3 External APIs
+
+| API | Status | Phase 3 Alternative |
+|-----|--------|---------------------|
+| Telegram Bot | ✅ Free, no credentials needed | Patient voice messages + CHW alerts |
+| IndicTrans2 Docker | ✅ Already running (`localhost:8000`) | STT/TTS for IVR + Flutter voice widget |
+| MiniMax API | ✅ `MINIMAX_API_KEY` in environment | SBAR generation |
+| Twilio | ❌ Access problems | Telegram Bot (adapter: `USE_TWILIO=false`) |
+| NHA/ABDM | ❌ Unavailable | Local ABHA generator |
+| Bhashini | ❌ Access not granted | IndicTrans2 Docker |
+
+---
+
+## 8. Phase 3 Success Criteria
+
+1. **Flutter UI complete** — CHW can register patient, enter vitals, see risk score, view SBAR, log GPS-tagged visit — all from Flutter app screens
+2. **GPS on every visit** — `latitude`/`longitude` attached to every visit log in SQLite
+3. **Telegram IVR live** — Patient sends voice via Telegram bot → CHW receives transcribed message
+4. **Emergency alerts fire** — Emergency keywords in voice transcript trigger `EMERGENCY` tier Telegram alerts to all 4 recipients
+5. **FastAPI backend deployed** — Accessible from public URL (not localhost)
+6. **End-to-end smoke test** — Flutter → FastAPI → IVR → Telegram → CHW completes without manual intervention
+7. **Flutter talks to deployed backend** — `core/constants.dart` updated with deployed URL
+
+---
+
+## 9. What We're Not Building (Yet)
+
+- On-device quantized LLM (Phase 4 — ONNX runtime + model validation required)
+- Full ABDM HIU certification (Phase 4)
+- Live Twilio integration (Phase 4 — adapter ready, flip `USE_TWILIO=true` when credentials arrive)
+- Live NHA/ABDM integration (Phase 4 — adapter ready, flip `USE_LIVE_ABDM=true`)
+- WhatsApp Business API (Telegram used for demo; adapter ready)
 - 50k concurrent CHW scale testing (government mandate scenario)
-- Smart reply for CHW WhatsApp follow-up messages
 
 ---
 
-## 8. Phase 2 Success Criteria (API-Pivoted for Hackathon Demo)
-
-1. **Pilot partner PHC operational** — ≥3 CHWs actively using the app in demo mode
-2. **No ABDM stub** — All patient registrations verified against local ABHA generator with valid Mod97 checksum
-3. **Voice pipeline live** — IndicTrans2 STT/TTS replacing all Bhashini stubs in Phase 1
-4. **Supervisor on dashboard** — PHC supervisor accessing aggregate data on Flask/SQLite dashboard
-5. **Telegram alerts active** — CHW and supervisor receiving Telegram messages for HIGH-risk patients
-6. **XGBoost shadow ML running** — Both ML and rule-based scores returned in `/risk` endpoint
-7. **GPS visit logs** — Home visits automatically tagged with GPS coordinates in SQLite
-8. **Adapter ready** — `USE_LIVE_ABDM`, `USE_BHASHINI`, `USE_TWILIO` flags documented for when credentials arrive
-
-> **Note:** Criteria 2 and 3 use local/Telegram alternatives for hackathon demo. When live NHA and Bhashini credentials are available, flip env vars — criteria remain valid without code changes.
-5. **ML shadow running** — Model producing scores alongside rule-based in production
-6. **GPS compliance proof** — Visit logs with GPS coordinates accepted by NHM program officers
-
----
-
-*Last updated: 2026-05-11 — Phase 2 strategy added*
+*Last updated: 2026-05-11 — Phase 3 strategy added (end-to-end wiring + full Flutter UI + deployment)*

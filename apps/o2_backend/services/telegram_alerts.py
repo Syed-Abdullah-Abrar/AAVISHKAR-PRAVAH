@@ -6,7 +6,7 @@ Routes IVR transcribed voice alerts via Telegram.
 
 import os
 import httpx
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -77,7 +77,7 @@ def build_alert_message(
                 msg += f"  • {k}: {v}\n"
     
     msg += f"\n{details}\n"
-    msg += f"\n_Sent: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}_"
+    msg += f"\n_Sent: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}_"
     return msg
 
 
@@ -158,7 +158,7 @@ async def build_daily_digest(phc_id: str, high_risk: list) -> str:
     if not high_risk:
         return "✅ *Daily Digest:* No high-risk patients. All patients stable."
 
-    msg = f"📊 *Daily Digest — {datetime.now().strftime('%Y-%m-%d')}*\n\n"
+    msg = f"📊 *Daily Digest — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}*\n\n"
     msg += f"🚨 *High Risk Patients ({len(high_risk)}):*\n\n"
     for p in high_risk[:10]:
         msg += f"• {p['name']} — {p['risk_level']}\n"

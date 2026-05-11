@@ -12,7 +12,7 @@ USE_LIVE_ABDM=true and the abdm router will use live API instead.
 import random
 import re
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 
@@ -84,7 +84,7 @@ def generate_abha_with_name(name: str, dob: str, gender: str) -> dict:
         "gender": gender,
         "valid": True,
         "source": "local_generator",
-        "generated_at": datetime.utcnow().isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 

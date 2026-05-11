@@ -7,7 +7,6 @@ No frontend framework needed — single HTML file + JSON API.
 import os
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from datetime import datetime
 
 from services.database import patient_repo, visit_repo, schedule_repo, vitals_repo
