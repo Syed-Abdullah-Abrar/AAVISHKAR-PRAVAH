@@ -18,7 +18,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from dotenv import load_dotenv
 
-from routers import risk, sbar
+from routers import risk, sbar, abdm, visits, dashboard
+from services.database import init_db
+from services.ml_risk_scorer import init_model
 
 # Load environment variables
 load_dotenv()
@@ -35,6 +37,10 @@ async def lifespan(app: FastAPI):
     print("[O2 Backend] Starting O2 FastAPI Server...")
     print(f"[O2 Backend] Environment: {os.getenv('ENV', 'development')}")
     print(f"[O2 Backend] AI Provider: {os.getenv('AI_PROVIDER', 'openai')}")
+    
+    # Phase 2: Initialize SQLite database + ML model
+    await init_db()
+    await init_model()
     
     yield
     
@@ -87,6 +93,9 @@ app.add_middleware(
 
 app.include_router(risk.router, prefix="/risk", tags=["Risk Assessment"])
 app.include_router(sbar.router, prefix="/sbar", tags=["SBAR Generation"])
+app.include_router(abdm.router, prefix="/abdm", tags=["ABDM / ABHA"])
+app.include_router(visits.router, prefix="/visits", tags=["Visits / GPS"])
+app.include_router(dashboard.router, prefix="/dashboard", tags=["Supervisor Dashboard"])
 
 # ─── Health Check ─────────────────────────────────────────────────────────────
 

@@ -17,8 +17,15 @@ httpx==0.27.2
 openai==1.55.3
 anthropic==0.28.0
 
-# ML Model (Phase 1: Rule-based mock)
+# ML Model (Phase 1: Rule-based mock, Phase 2: XGBoost shadow ML)
 scikit-learn==1.5.2
+xgboost==2.1.0
+
+# SQLite for demo (Phase 2)
+aiosqlite==0.20.0
+
+# Telegram Bot (Phase 2)
+python-telegram-bot==21.0.0
 
 # Data Processing
 numpy==2.1.1
