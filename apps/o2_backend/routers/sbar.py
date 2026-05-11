@@ -14,86 +14,14 @@ LLM-powered with strict JSON schema validation.
 """
 
 from fastapi import APIRouter, HTTPException, Header
-from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime
+
+from models import SBARGenerationRequest, SBARGenerationResponse
 from services.sbar_llm import SBARLLMService
 
 router = APIRouter()
 sbar_service = SBARLLMService()
-
-
-# ─── Request/Response Models ─────────────────────────────────────────────────
-
-class VitalReading(BaseModel):
-    """Single vital sign reading."""
-    vital_type: str
-    value: str
-    recorded_at: str
-
-
-class PatientHistory(BaseModel):
-    """Patient longitudinal data for SBAR generation."""
-    
-    patient_id: str
-    name: str
-    age: int
-    gestational_week: Optional[int] = None
-    abha_id: str
-    
-    # Recent vitals
-    recent_vitals: list[VitalReading]
-    
-    # Risk history
-    current_risk_level: str
-    
-    # Clinical notes
-    high_risk_factors: list[str] = []
-    current_medications: list[str] = []
-    allergies: list[str] = []
-    
-    # Previous SBARs if any
-    previous_sbar_summary: Optional[str] = None
-
-
-class SBARGenerationRequest(BaseModel):
-    """Request to generate SBAR clinical handover document."""
-    
-    patient: PatientHistory
-    generating_chw_id: str
-    generating_chw_name: str
-    generating_facility: str = "PHC"
-    referral_reason: Optional[str] = None
-
-
-class SBAROutput(BaseModel):
-    """Structured SBAR clinical handover document."""
-    
-    situation: str = Field(..., max_length=200)
-    background: str = Field(..., max_length=500)
-    assessment: str = Field(..., max_length=500)
-    recommendation: str = Field(..., max_length=300)
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "situation": "28-year-old pregnant woman, G2P1 at 34 weeks gestation, presenting with elevated BP (150/95 mmHg) detected during home visit.",
-                "background": "Second pregnancy, no previous complications. First BP reading elevated at 32 weeks. No history of diabetes or pre-eclampsia. Family history of hypertension in mother.",
-                "assessment": "Moderate risk for gestational hypertension. BP consistently elevated across two readings 48 hours apart. No proteinuria. Fetal movements normal. Risk level: Medium-High.",
-                "recommendation": "1) Schedule PHC visit within 48 hours for BP monitoring and urine protein test. 2) CHW to monitor BP twice daily and record in O2 app. 3) If BP exceeds 160/110 or proteinuria develops, initiate emergency referral to district hospital."
-            }
-        }
-
-
-class SBARGenerationResponse(BaseModel):
-    """Full SBAR generation response."""
-    
-    patient_id: str
-    sbar: SBAROutput
-    risk_level: str
-    generated_at: datetime
-    generating_chw_id: str
-    document_id: str  # FHIR DocumentReference ID
 
 
 # ─── API Endpoint ─────────────────────────────────────────────────────────────

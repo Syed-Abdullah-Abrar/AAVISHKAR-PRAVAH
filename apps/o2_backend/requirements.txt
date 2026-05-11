@@ -25,7 +25,7 @@ numpy==2.1.1
 pandas==2.2.3
 
 # FHIR
-fhir.resources==6.6.2
+fhir.resources==7.1.0
 
 # Environment
 python-dotenv==1.0.1

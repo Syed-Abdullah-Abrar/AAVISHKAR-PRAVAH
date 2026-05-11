@@ -15,12 +15,8 @@ import json
 import os
 from datetime import datetime
 from typing import Optional
-from routers.sbar import (
-    SBARGenerationRequest,
-    SBARGenerationResponse,
-    SBAROutput,
-    PatientHistory,
-)
+
+from models import SBARGenerationRequest, SBARGenerationResponse, SBAROutput, PatientHistory
 
 # ─── System Prompt ──────────────────────────────────────────────────────────
 

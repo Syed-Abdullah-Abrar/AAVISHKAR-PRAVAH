@@ -25,7 +25,8 @@ Risk Levels:
 
 from datetime import datetime
 from typing import Optional
-from routers.risk import (
+
+from models import (
     RiskAssessmentRequest,
     RiskAssessmentResponse,
     FlaggedFactor,
