@@ -48,6 +48,10 @@ dependencies:
   # Voice I/O
   record: ^5.1.2
   audioplayers: ^6.1.0
+
+  # Location / GPS
+  geolocator: ^13.0.2
+  permission_handler: ^11.3.1
   
   # Push Notifications
   firebase_messaging: ^15.1.3

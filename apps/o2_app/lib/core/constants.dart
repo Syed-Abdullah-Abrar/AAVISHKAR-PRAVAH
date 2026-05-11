@@ -12,21 +12,33 @@ class O2Constants {
       'Offline-first maternal healthcare monitoring for Community Health Workers';
 
   // ─── Supabase Configuration ──────────────────────────────────────────────────
+  // Phase 3: SQLite-first for demo. Supabase sync optional.
   static const String supabaseUrl = 'https://<PROJECT_ID>.supabase.co';
   static const String supabaseAnonKey = '<ANON_KEY>';
   static const String supabaseServiceRoleKey = '<SERVICE_ROLE_KEY>';
 
   // ─── FastAPI Backend (AI Server) ────────────────────────────────────────────
-  static const String aiServerUrl = 'http://<HOST>:8000';
+  // For emulator: 10.0.2.2 → host machine's localhost
+  // For physical device / deployed: update to deployed URL
+  static const String aiServerUrl = 'http://10.0.2.2:8000'; // Android emulator
+  // static const String aiServerUrl = 'https://your-deployed-host.railway.app'; // deployed
   static const String riskEndpoint = '/risk';
   static const String sbarEndpoint = '/sbar';
   static const String healthEndpoint = '/health';
+  static const String abhaEndpoint = '/abdm';
+  static const String visitsEndpoint = '/visits';
+  static const String ivrEndpoint = '/ivr';
   static const Duration aiRequestTimeout = Duration(seconds: 30);
 
-  // ─── IVR Backend (Twilio) ───────────────────────────────────────────────────
-  static const String ivrBackendUrl = 'http://<HOST>:8001';
-  static const String twilioWebhookMissedCall = '/twilio/missed-call';
-  static const String twilioWebhookVoiceRecording = '/twilio/voice-recording';
+  // ─── IVR Backend (Telegram — merged into FastAPI at /ivr) ─────────────────
+  static const String ivrBackendUrl = 'http://10.0.2.2:8000';
+
+  // ─── Telegram Bot ──────────────────────────────────────────────────────────
+  static const String telegramBotToken = '8717671171:AAEmr0UNaBRuZvRoHeJ5SYMdd87N1-xFZYg';
+
+  // ─── Bhashini — replaced by IndicTrans2 Docker + IndicTransService ───────────
+  // Keep stubs for API shape — replace calls with IndicTransService in Phase 3
+  static const String bhashiniBaseUrl = 'https://api.bhashini.gov.in';
 
   // ─── WorkManager Sync Configuration ─────────────────────────────────────────
   static const String syncWorkName = 'o2_background_sync';

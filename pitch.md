@@ -221,7 +221,22 @@ Checksum validation: number % 97 == 1 (ISO 7064 Mod 97)
 
 ---
 
-## Phase 2 Roadmap
+## Phase 3 Roadmap (Completed)
+
+| Item | Description | Status |
+|------|-------------|--------|
+| **Telegram Bot IVR** | Patient voice → IndicTrans2 STT → Telegram alert to CHW (replaced Twilio) | ✅ |
+| **Full Flutter UI** | Complete StatefulWidget screens: Home, Patient List/Reg/Detail, Vitals, SBAR, Voice, Sync, Settings, Emergency | ✅ |
+| **IndicTrans2 Docker** | Self-hosted STT/TTS at localhost:8000 — both backend and Flutter | ✅ |
+| **MiniMax AI Brain** | FastAPI `/risk` and `/sbar` routes wired to MiniMax API | ✅ |
+| **GPS Auto-Tag** | `geolocator` package in Flutter → lat/long on every vitals record | ✅ |
+| **Telegram Service** | Flutter `TelegramService` for in-app voice forwarding | ✅ |
+| **CORS/Android Emulator** | FastAPI CORS for `http://10.0.2.2:3000` (Android emulator host) | ✅ |
+| **On-device ML deferred** | Phase 4: quantized XGBoost for offline inference | 🔜 |
+
+---
+
+## Phase 2 Roadmap (Legacy)
 
 | Item | Description |
 |------|-------------|
