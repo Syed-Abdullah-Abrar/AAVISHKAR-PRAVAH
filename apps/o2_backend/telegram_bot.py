@@ -225,6 +225,10 @@ RISK_EMOJI = {
 def risk_bar(level: str) -> str:
     return RISK_EMOJI.get(level.upper(), "⚪")
 
+# ─── IN-MEMORY UPLOAD LOG (appended at runtime) ────────────────────────────────
+# Stores photos/docs/readings sent by Lakshmi during the session
+LAKSHMI_UPLOADS: list = []
+
 # ─── DB UPDATE (Dashboard Sync) ───────────────────────────────────────────────
 
 async def update_dashboard(new_risk: str, transcript: str):
@@ -248,6 +252,31 @@ async def update_dashboard(new_risk: str, transcript: str):
         logger.info(f"Dashboard updated → Lakshmi risk: {new_risk}")
     except Exception as e:
         logger.warning(f"Dashboard sync skipped: {e}")
+
+
+async def save_patient_note(note_type: str, content: str, extra: dict = None):
+    """Store any patient-submitted data (report, image, reading) in DB and memory."""
+    entry = {
+        "id": str(uuid.uuid4()),
+        "type": note_type,
+        "content": content,
+        "timestamp": datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M"),
+        "extra": extra or {},
+    }
+    LAKSHMI_UPLOADS.append(entry)
+    logger.info(f"Patient note saved: [{note_type}] {content[:80]}")
+    try:
+        import aiosqlite
+        from services.database import DB_PATH
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute("""
+                INSERT OR IGNORE INTO ivr_transcripts (id, patient_id, transcript_text, language, audio_url)
+                SELECT ?, id, ?, 'en', ?
+                FROM patients WHERE LOWER(name) LIKE '%lakshmi%' LIMIT 1
+            """, (entry["id"], f"[{note_type.upper()}] {content}", note_type))
+            await db.commit()
+    except Exception as e:
+        logger.warning(f"DB note save skipped: {e}")
 
 # ─── AI TRIAGE ────────────────────────────────────────────────────────────────
 
@@ -418,10 +447,73 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 
-# ─── TEXT HANDLER (AI Triage) ─────────────────────────────────────────────────
+# ─── SMART TEXT DETECTION ─────────────────────────────────────────────────────
+
+def detect_structured_update(text: str) -> tuple[str, str] | None:
+    """
+    Detects if Lakshmi is reporting structured data like:
+    - New BP reading: '140/92'
+    - New medication: 'Doctor gave Labetalol 100mg'
+    - New appointment: 'Next visit 20 May'
+    - Lab result: 'Hb is 9.8'
+    Returns (category, parsed_value) or None if it's a symptom report.
+    """
+    t = text.lower()
+    # BP reading pattern: digits/digits
+    import re
+    bp_match = re.search(r'(\d{2,3})\s*/\s*(\d{2,3})', text)
+    if bp_match and any(k in t for k in ['bp', 'blood pressure', 'pressure', 'reading', 'checked']):
+        return ('bp_reading', f"BP: {bp_match.group(1)}/{bp_match.group(2)} mmHg")
+
+    if any(k in t for k in ['hb', 'hemoglobin', 'haemoglobin', 'blood test', 'iron']):
+        nums = re.findall(r'\d+\.?\d*', text)
+        if nums:
+            return ('lab_result', f"Hb: {nums[0]} g/dL")
+
+    if any(k in t for k in ['tablet', 'medicine', 'dose', 'doctor gave', 'prescribed', 'new medicine', 'injection']):
+        return ('new_medication', text)
+
+    if any(k in t for k in ['appointment', 'visit', 'checkup', 'next visit', 'schedule']):
+        return ('appointment_update', text)
+
+    if any(k in t for k in ['weight', 'kg', 'kilo']):
+        nums = re.findall(r'\d+\.?\d*', text)
+        if nums:
+            return ('weight_update', f"Weight: {nums[0]} kg")
+
+    return None
+
+
+# ─── TEXT HANDLER (Smart: triage OR structured update) ───────────────────────
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
+
+    # Check if it's a structured health update (not a symptom report)
+    structured = detect_structured_update(text)
+    if structured:
+        cat, val = structured
+        await save_patient_note(cat, val, {"raw": text})
+        labels = {
+            'bp_reading':        ('🩸', 'Blood Pressure Reading'),
+            'lab_result':        ('🔬', 'Lab Result'),
+            'new_medication':    ('💊', 'New Medication'),
+            'appointment_update':('📅', 'Appointment Update'),
+            'weight_update':     ('⚖️', 'Weight Update'),
+        }
+        emoji, label = labels.get(cat, ('📝', 'Health Update'))
+        await update.message.reply_text(
+            f"{emoji} *{label} Recorded!*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"✅ *Saved:* _{val}_\n"
+            f"🕐 *Time:* {datetime.now(timezone.utc).strftime('%d %b %Y, %H:%M')} UTC\n\n"
+            f"Your health record has been updated. Use /my_history or /my_reports to view.\n"
+            f"_If you are feeling unwell, please describe your symptoms._",
+            parse_mode="Markdown"
+        )
+        return
+
+    # Otherwise → full AI symptom triage
     processing = await update.message.reply_text("⏳ *Analyzing your symptoms...*", parse_mode="Markdown")
 
     result = await run_ai_triage(text)
@@ -510,6 +602,100 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await processing.edit_text(f"❌ Could not process voice message: {e}")
 
 
+# ─── PHOTO HANDLER ────────────────────────────────────────────────────────────
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Accept photos of prescriptions, lab reports, prescriptions etc."""
+    caption = update.message.caption or "Photo received (no caption)"
+    file_id = update.message.photo[-1].file_id  # largest size
+
+    # Classify what was sent
+    c = caption.lower()
+    if any(k in c for k in ['report', 'lab', 'test', 'result', 'blood']):
+        cat, label = 'lab_report_photo', '🔬 Lab Report'
+    elif any(k in c for k in ['prescription', 'medicine', 'tablet', 'dose']):
+        cat, label = 'prescription_photo', '💊 Prescription'
+    elif any(k in c for k in ['scan', 'ultrasound', 'usg', 'sonography']):
+        cat, label = 'scan_photo', '🖼 Ultrasound Scan'
+    else:
+        cat, label = 'health_photo', '📸 Health Document'
+
+    await save_patient_note(cat, f"{label}: {caption}", {"telegram_file_id": file_id})
+
+    await update.message.reply_text(
+        f"{label} *Received & Saved!*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"✅ Your photo has been saved to your health record.\n"
+        f"🕐 *Time:* {datetime.now(timezone.utc).strftime('%d %b %Y, %H:%M')} UTC\n"
+        f"📝 *Caption:* _{caption}_\n\n"
+        f"_Your ASHA worker Savita Ben and the PHC have been notified._",
+        parse_mode="Markdown"
+    )
+
+
+# ─── DOCUMENT HANDLER ─────────────────────────────────────────────────────────
+
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Accept PDF reports, discharge summaries, etc."""
+    doc = update.message.document
+    caption = update.message.caption or "No description"
+    fname = doc.file_name or "document"
+
+    c = (fname + caption).lower()
+    if any(k in c for k in ['lab', 'blood', 'report', 'result']):
+        cat, label = 'lab_report_doc', '🔬 Lab Report (PDF)'
+    elif any(k in c for k in ['prescription', 'rx']):
+        cat, label = 'prescription_doc', '💊 Prescription (PDF)'
+    elif any(k in c for k in ['discharge', 'hospital', 'summary']):
+        cat, label = 'discharge_doc', '🏥 Discharge Summary'
+    else:
+        cat, label = 'health_doc', '📄 Health Document'
+
+    await save_patient_note(cat, f"{label}: {fname} — {caption}", {"telegram_file_id": doc.file_id})
+
+    await update.message.reply_text(
+        f"{label} *Received & Saved!*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"✅ *File:* `{fname}` saved to your health record.\n"
+        f"🕐 *Time:* {datetime.now(timezone.utc).strftime('%d %b %Y, %H:%M')} UTC\n"
+        f"📝 *Description:* _{caption}_\n\n"
+        f"_This has been shared with your PHC records._",
+        parse_mode="Markdown"
+    )
+
+
+# ─── MY UPLOADS COMMAND ───────────────────────────────────────────────────────
+
+async def cmd_my_uploads(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not LAKSHMI_UPLOADS:
+        await update.message.reply_text(
+            "📂 *My Uploaded Records*\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "_No uploads yet this session._\n\n"
+            "📤 You can send me:\n"
+            "   • Photos of prescriptions or lab reports\n"
+            "   • PDF documents\n"
+            "   • New readings like 'BP is 130/85' or 'Hb 10.4'\n"
+            "   • New medicines like 'Doctor added Labetalol 100mg'",
+            parse_mode="Markdown"
+        )
+        return
+
+    lines = ["📂 *My Uploaded Records — Lakshmi Devi*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n"]
+    icons = {
+        'bp_reading': '🩸', 'lab_result': '🔬', 'new_medication': '💊',
+        'appointment_update': '📅', 'weight_update': '⚖️',
+        'lab_report_photo': '🔬', 'prescription_photo': '💊',
+        'scan_photo': '🖼', 'health_photo': '📸',
+        'lab_report_doc': '📄', 'prescription_doc': '📄',
+        'discharge_doc': '🏥', 'health_doc': '📄',
+    }
+    for u in reversed(LAKSHMI_UPLOADS[-10:]):
+        icon = icons.get(u['type'], '📝')
+        lines.append(f"{icon} *{u['timestamp']}*\n   _{u['content'][:100]}_\n")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
 # ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 async def post_init(app: Application):
@@ -519,6 +705,7 @@ async def post_init(app: Application):
         BotCommand("my_history",      "Past vitals & checkup records"),
         BotCommand("my_reports",      "Latest medical report"),
         BotCommand("upcoming_checks", "Next scheduled visits"),
+        BotCommand("my_uploads",      "My uploaded reports & readings"),
         BotCommand("help",            "All commands"),
     ])
     logger.info("Commands registered. Bot is ready!")
@@ -542,7 +729,10 @@ def main():
     app.add_handler(CommandHandler("my_history",      cmd_my_history))
     app.add_handler(CommandHandler("my_reports",      cmd_my_reports))
     app.add_handler(CommandHandler("upcoming_checks", cmd_upcoming_checks))
-    app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    app.add_handler(CommandHandler("my_uploads",      cmd_my_uploads))
+    app.add_handler(MessageHandler(filters.VOICE,    handle_voice))
+    app.add_handler(MessageHandler(filters.PHOTO,    handle_photo))
+    app.add_handler(MessageHandler(filters.Document.ALL, handle_document))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     app.run_polling(allowed_updates=Update.ALL_TYPES)
