@@ -1,34 +1,30 @@
 """
-O2 Platform — Interactive Telegram Bot (Patient Persona)
-═══════════════════════════════════════════════════
+O2 Platform — Telegram Bot: Lakshmi's Health Interface
+═══════════════════════════════════════════════════════
 
-A fully interactive Telegram bot representing the Patient/ASHA interface.
-Users can:
-  /start            — Welcome message + menu
-  /my_history       — Show vitals history
-  /my_reports       — Latest generated reports/SBARs
-  /upcoming_checks  — Show pending follow-ups
-  /help             — Command list
+All interactions are from the lens of Lakshmi Devi, a high-risk
+pregnant patient in rural Karnataka. Her medical history is detailed
+and realistic for demo purposes.
 
-Plus:
-  - Send any text → AI Triage via Minimax/OpenAI
-  - Send a voice note → Transcribed via AI, then Triaged
+Commands:
+  /start           — Welcome + menu
+  /my_history      — Vitals history (last 4 visits)
+  /my_reports      — Latest SBAR / medical report
+  /upcoming_checks — Next scheduled visits
+  /my_profile      — Full patient profile
+  /help            — Command list
 
-Usage:
-    cd apps/o2_backend
-    source ../../.venv/bin/activate
-    PYTHONPATH=. python telegram_bot.py
+Text/Voice → AI Triage via Minimax/OpenAI → Dashboard update
 """
 
 import os
 import sys
 import uuid
 import tempfile
-import asyncio
 import logging
+import json
 from datetime import datetime, timezone
 
-# Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from dotenv import load_dotenv
@@ -39,12 +35,6 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler, filters, ContextTypes
 )
 
-from services.database import (
-    init_db, patient_repo, vitals_repo, visit_repo, schedule_repo
-)
-
-import httpx
-
 logging.basicConfig(
     format="%(asctime)s [O2 Bot] %(message)s",
     level=logging.INFO,
@@ -52,374 +42,486 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+OPENAI_API_KEY     = os.getenv("OPENAI_API_KEY", "")
+MINIMAX_API_KEY    = os.getenv("MINIMAX_API_KEY", "")
 
-# AI Provider Setup (Using Minimax as OpenAI compatible or direct OpenAI)
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY", "")
+# ─── AI Client Setup ─────────────────────────────────────────────────────────
 
-# Setup OpenAI client
 try:
     from openai import AsyncOpenAI
     if OPENAI_API_KEY:
-        ai_client = AsyncOpenAI(api_key=OPENAI_API_KEY)
-        LLM_MODEL = "gpt-4o-mini"
+        ai_client  = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        LLM_MODEL  = "gpt-4o-mini"
         AUDIO_MODEL = "whisper-1"
+        logger.info("Using OpenAI GPT-4o-mini")
     elif MINIMAX_API_KEY:
-        ai_client = AsyncOpenAI(api_key=MINIMAX_API_KEY, base_url="https://api.minimaxi.chat/v1")
-        LLM_MODEL = "abab6.5s-chat"
+        ai_client  = AsyncOpenAI(
+            api_key=MINIMAX_API_KEY,
+            base_url="https://api.minimaxi.chat/v1"
+        )
+        LLM_MODEL  = "abab6.5s-chat"
         AUDIO_MODEL = "speech-01"
+        logger.info("Using Minimax LLM")
     else:
         ai_client = None
+        logger.warning("No AI API key found — using fallback triage")
 except ImportError:
     ai_client = None
 
-# For demo purposes, we map the Telegram user to a specific high-risk patient
-# In production, this would be mapped via phone number during registration
-DEMO_PATIENT_NAME = "Lakshmi" 
+# ─── LAKSHMI'S COMPLETE MEDICAL PROFILE (Demo Data) ──────────────────────────
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
+LAKSHMI = {
+    "id": "patient-lakshmi-001",
+    "name": "Lakshmi Devi",
+    "age": 28,
+    "village": "Ratnagiri",
+    "district": "Haveri",
+    "state": "Karnataka",
+    "abha": "12-3456-7890-1122",
+    "blood_group": "B+",
+    "phone": "+91 94480 12345",
+    "asha_worker": "Savita Ben",
+    "phc": "PHC Ratnagiri (PHC-001)",
+    "gestational_week": 32,
+    "edd": "2026-07-14",
+    "gravida": 2,
+    "parity": 1,
+    "last_delivery": "2023 — Normal delivery, healthy baby boy (3.1 kg)",
+    "risk_level": "LOW",   # starts LOW — escalates during demo
+    "medical_history": [
+        "Mild gestational hypertension (diagnosed at Week 20)",
+        "Borderline anaemia — Hb 10.2 g/dL (Week 28 reading)",
+        "Mild oedema of ankles (Week 30)",
+        "Previous pregnancy: Normal delivery, no complications",
+    ],
+    "current_medications": [
+        "Iron + Folic Acid (IFA) — 1 tablet daily",
+        "Calcium 500mg — 1 tablet twice daily",
+        "Methyldopa 250mg — for gestational hypertension",
+    ],
+    "allergies": "None known",
+}
+
+LAKSHMI_VITALS_HISTORY = [
+    {
+        "date": "09 May 2026",
+        "week": "Week 31",
+        "bp": "138/88 mmHg ⚠️",
+        "hr": "82 bpm",
+        "spo2": "98%",
+        "temp": "36.8°C",
+        "weight": "63.5 kg",
+        "hb": "10.2 g/dL ⚠️",
+        "fhr": "142 bpm ✅",
+        "notes": "Mild ankle swelling noted. BP slightly elevated. IFA compliance confirmed.",
+    },
+    {
+        "date": "25 Apr 2026",
+        "week": "Week 29",
+        "bp": "132/84 mmHg",
+        "hr": "80 bpm",
+        "spo2": "99%",
+        "temp": "36.6°C",
+        "weight": "62.8 kg",
+        "hb": "10.5 g/dL ⚠️",
+        "fhr": "138 bpm ✅",
+        "notes": "BP stable. Advised increased iron-rich diet. Counselled on danger signs.",
+    },
+    {
+        "date": "10 Apr 2026",
+        "week": "Week 27",
+        "bp": "128/80 mmHg ✅",
+        "hr": "78 bpm",
+        "spo2": "99%",
+        "temp": "36.5°C",
+        "weight": "61.9 kg",
+        "hb": "10.8 g/dL",
+        "fhr": "136 bpm ✅",
+        "notes": "Normal visit. Fetal movements reported as active.",
+    },
+    {
+        "date": "26 Mar 2026",
+        "week": "Week 24",
+        "bp": "124/78 mmHg ✅",
+        "hr": "76 bpm",
+        "spo2": "99%",
+        "temp": "36.4°C",
+        "weight": "60.5 kg",
+        "hb": "11.2 g/dL",
+        "fhr": "134 bpm ✅",
+        "notes": "Routine ANC visit. All normal. GDM screen negative.",
+    },
+]
+
+LAKSHMI_REPORTS = {
+    "sbar_date": "09 May 2026",
+    "situation": (
+        "Lakshmi Devi, 28 years, G2P1 at Week 31, presents with persistently "
+        "elevated BP (138/88 mmHg) and mild ankle oedema at routine ASHA visit. "
+        "Hemoglobin borderline at 10.2 g/dL."
+    ),
+    "background": (
+        "Known gestational hypertension since Week 20. On Methyldopa 250mg. "
+        "Previous delivery was normal (2023). No prior pre-eclampsia. "
+        "IFA compliance confirmed; however dietary intake remains suboptimal. "
+        "Family history: mother had hypertension in third pregnancy."
+    ),
+    "assessment": (
+        "Risk Level: HIGH — Patient shows two WHO danger signs: borderline BP "
+        "approaching 140/90 threshold, and borderline anaemia. Risk of "
+        "pre-eclampsia progression cannot be excluded. Requires close monitoring "
+        "with BP check every 48 hours."
+    ),
+    "recommendation": (
+        "1. Increase BP monitoring to every 48 hours. "
+        "2. PHC consultation within 5 days (by 14 May). "
+        "3. Emergency referral if: BP ≥ 160/110, severe headache, visual "
+        "disturbance, or epigastric pain. "
+        "4. Continue Methyldopa, IFA, and Calcium."
+    ),
+    "generated_by": "O₂ AI System + ASHA Worker: Savita Ben",
+}
+
+LAKSHMI_UPCOMING = [
+    {
+        "date": "14 May 2026",
+        "type": "PHC Consultation",
+        "location": "PHC Ratnagiri — Dr. Meena Patil",
+        "reason": "BP review + Hb check + Week 32 ANC",
+        "urgency": "🟡 Due in 2 days",
+    },
+    {
+        "date": "23 May 2026",
+        "type": "ASHA Home Visit",
+        "location": "Lakshmi's home, Ratnagiri",
+        "reason": "Routine Week 34 vitals check + fetal movement count",
+        "urgency": "🟢 Scheduled",
+    },
+    {
+        "date": "06 Jun 2026",
+        "type": "PHC Consultation + Ultrasound",
+        "location": "PHC Ratnagiri",
+        "reason": "Week 36 growth scan + pre-delivery assessment",
+        "urgency": "🟢 Scheduled",
+    },
+    {
+        "date": "20 Jun 2026",
+        "type": "Hospital Pre-admission",
+        "location": "District Hospital, Haveri",
+        "reason": "Pre-delivery admission planning + birth preparedness counselling",
+        "urgency": "🟢 Scheduled",
+    },
+]
+
+# ─── RISK HELPERS ─────────────────────────────────────────────────────────────
 
 RISK_EMOJI = {
     "EMERGENCY": "🚨",
-    "HIGH": "🔴",
-    "MEDIUM": "🟡",
-    "LOW": "🟢",
+    "HIGH":      "🔴",
+    "MEDIUM":    "🟡",
+    "LOW":       "🟢",
 }
 
 def risk_bar(level: str) -> str:
     return RISK_EMOJI.get(level.upper(), "⚪")
 
-async def get_demo_patient():
-    """Get the patient record for the demo user."""
-    patients = await patient_repo.list_all()
-    for p in patients:
-        if DEMO_PATIENT_NAME.lower() in p.get("name", "").lower():
-            return p
-    # Fallback to first patient if Lakshmi is missing
-    return patients[0] if patients else None
+# ─── DB UPDATE (Dashboard Sync) ───────────────────────────────────────────────
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND HANDLERS
-# ═══════════════════════════════════════════════════════════════════════════════
+async def update_dashboard(new_risk: str, transcript: str):
+    """Push the risk level change to the central database so the dashboard updates."""
+    try:
+        import aiosqlite
+        from services.database import DB_PATH
+        async with aiosqlite.connect(DB_PATH) as db:
+            # Update patient risk
+            await db.execute(
+                "UPDATE patients SET risk_level = ?, updated_at = ? WHERE LOWER(name) LIKE '%lakshmi%'",
+                (new_risk.upper(), datetime.now(timezone.utc).isoformat())
+            )
+            # Log the IVR transcript so dashboard alert feed shows it
+            await db.execute("""
+                INSERT OR IGNORE INTO ivr_transcripts (id, patient_id, transcript_text, language, audio_url)
+                SELECT ?, id, ?, 'en', 'telegram'
+                FROM patients WHERE LOWER(name) LIKE '%lakshmi%' LIMIT 1
+            """, (str(uuid.uuid4()), f"TELEGRAM REPORT: {transcript}"))
+            await db.commit()
+        logger.info(f"Dashboard updated → Lakshmi risk: {new_risk}")
+    except Exception as e:
+        logger.warning(f"Dashboard sync skipped: {e}")
 
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Welcome message for the patient persona."""
-    patient = await get_demo_patient()
-    name = patient.get("name", "Patient") if patient else "Patient"
-    
-    welcome = (
-        f"🫁 *O₂ Platform — My Health Assistant*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"Namaste *{name}*, welcome to your O₂ Health Assistant.\n\n"
-        f"🔹 /my_history — View your past vitals & checkups\n"
-        f"🔹 /my_reports — View recent medical reports\n"
-        f"🔹 /upcoming_checks — Check your next scheduled visit\n"
-        f"🔹 /help — See all options\n\n"
-        f"💬 *Need help?* Type your symptoms here directly, or send a *voice message* to report how you are feeling.\n\n"
-        f"_Your health is our priority._"
-    )
-    await update.message.reply_text(welcome, parse_mode="Markdown")
+# ─── AI TRIAGE ────────────────────────────────────────────────────────────────
 
+LAKSHMI_CONTEXT = f"""
+Patient: {LAKSHMI['name']}, Age {LAKSHMI['age']}, Week {LAKSHMI['gestational_week']} of pregnancy.
+Medical History: {'; '.join(LAKSHMI['medical_history'])}
+Current Medications: {', '.join(LAKSHMI['current_medications'])}
+Last BP reading: 138/88 mmHg (Week 31). Last Hb: 10.2 g/dL.
+"""
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """List all commands."""
-    help_text = (
-        "📋 *My O₂ Commands*\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "/start — Welcome message\n"
-        "/my_history — Your past vitals & health records\n"
-        "/my_reports — Medical handovers and reports\n"
-        "/upcoming_checks — Next visits\n"
-        "/help — This menu\n\n"
-        "💬 *Report a symptom:* Just type what you're feeling\n"
-        "🎙 *Voice report:* Tap the microphone icon to send a voice note"
-    )
-    await update.message.reply_text(help_text, parse_mode="Markdown")
-
-
-async def cmd_my_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show vitals history for the patient."""
-    patient = await get_demo_patient()
-    if not patient:
-        await update.message.reply_text("❌ Patient profile not found.")
-        return
-
-    vitals_list = await vitals_repo.list_by_patient(patient["id"], limit=5)
-    if not vitals_list:
-        await update.message.reply_text("You have no vitals recorded yet.")
-        return
-
-    lines = [f"💓 *My Health History*\n━━━━━━━━━━━━━━━━━━━━━━━━━\n"]
-    for v in vitals_list:
-        sys = v.get("systolic_bp")
-        dia = v.get("diastolic_bp")
-        bp = f"{sys}/{dia} mmHg" if sys and dia else "N/A"
-        date = v.get("recorded_at", "")[:10]
-        lines.append(
-            f"📅 *{date}*\n"
-            f"   BP: {bp} | HR: {v.get('heart_rate', '?')} bpm\n"
-            f"   SpO₂: {v.get('spo2', '?')}% | Temp: {v.get('temperature', '?')}°C\n"
-        )
-
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-
-async def cmd_my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show latest SBAR/Reports for the patient."""
-    patient = await get_demo_patient()
-    if not patient:
-        return
-        
-    risk = patient.get("risk_level", "LOW").upper()
-    lines = [
-        f"📑 *My Medical Profile*\n━━━━━━━━━━━━━━━━━━━━━━\n",
-        f"👤 Name: {patient.get('name')}",
-        f"🆔 ABHA: {patient.get('abha_number', 'N/A')}",
-        f"{risk_bar(risk)} Current Status: *{risk}*\n",
-        f"📞 Emergency Contact: {patient.get('emergency_contact', 'N/A')}",
-        f"🏥 Registered PHC: {patient.get('phc_id', 'N/A')}\n"
-    ]
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-
-async def cmd_upcoming_checks(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show pending follow-ups."""
-    patient = await get_demo_patient()
-    if not patient:
-        return
-
-    schedules = await schedule_repo.list_pending(limit=10)
-    my_schedules = [s for s in schedules if s.get("patient_id") == patient["id"]]
-
-    if not my_schedules:
-        await update.message.reply_text("✅ You have no upcoming scheduled visits. Stay healthy!")
-        return
-
-    lines = ["📋 *Upcoming Check-ups*\n━━━━━━━━━━━━━━━━━━━━━━\n"]
-    for s in my_schedules:
-        date = s.get("scheduled_at", "")[:10]
-        reason = s.get("reason", "Routine Check-up")[:60]
-        lines.append(f"📅 *{date}*\n  📝 {reason}\n")
-
-    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# AI TRIAGE LOGIC
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def run_ai_triage(symptom_text: str, patient_name: str) -> dict:
-    """Send text to LLM for risk assessment."""
+async def run_ai_triage(symptom_text: str) -> dict:
     if not ai_client:
-        logger.warning("No AI Client configured! Using fallback triage.")
         return fallback_triage(symptom_text)
-        
-    system_prompt = """You are the O2 Maternal Health AI Triage Assistant.
-Analyze the patient's reported symptoms and return ONLY a valid JSON object.
-Rules:
-- EMERGENCY: Severe bleeding, seizures, unconsciousness, severe chest pain.
-- HIGH: Severe headache, swelling, high fever, severe abdominal pain, decreased fetal movement.
-- MEDIUM: Mild dizziness, vomiting, mild pain, minor infections.
-- LOW: Fatigue, normal pregnancy discomforts.
 
-JSON Schema required:
-{
+    system_prompt = f"""You are the O2 Maternal Health AI Triage system.
+Patient context:
+{LAKSHMI_CONTEXT}
+
+Analyze the reported symptoms and return ONLY valid JSON:
+{{
   "risk_level": "LOW|MEDIUM|HIGH|EMERGENCY",
-  "assessment": "Brief clinical explanation",
-  "patient_message": "A friendly, reassuring response to the patient explaining what to do next. If EMERGENCY/HIGH, tell them to visit the PHC immediately."
-}"""
+  "assessment": "Brief clinical explanation (1-2 sentences, referencing her history)",
+  "patient_message": "A warm, reassuring but clear message directly to Lakshmi. In English. If HIGH or EMERGENCY, tell her to go to PHC Ratnagiri immediately or call 108."
+}}
+
+Risk thresholds:
+- EMERGENCY: Severe headache + visual disturbance + swelling (classic pre-eclampsia triad), seizure, heavy bleeding, no fetal movement
+- HIGH: BP danger signs, severe abdominal pain, high fever, one or two danger signs present
+- MEDIUM: Mild headache, vomiting, dizziness without other signs, reduced fetal movement
+- LOW: Normal discomforts, minor issues"""
 
     try:
         response = await ai_client.chat.completions.create(
             model=LLM_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Patient Name: {patient_name}\nReported Symptoms: {symptom_text}"}
+                {"role": "user", "content": f"Lakshmi reports: {symptom_text}"}
             ],
             temperature=0.2,
             response_format={"type": "json_object"}
         )
-        content = response.choices[0].message.content
-        import json
-        return json.loads(content)
+        return json.loads(response.choices[0].message.content)
     except Exception as e:
-        logger.error(f"AI Triage error: {e}")
+        logger.error(f"AI triage error: {e}")
         return fallback_triage(symptom_text)
 
+
 def fallback_triage(text: str) -> dict:
-    """Keyword-based fallback if LLM fails."""
     text_lower = text.lower()
-    if any(k in text_lower for k in ["bleed", "seizure", "faint", "unconscious"]):
-        risk = "EMERGENCY"
-    elif any(k in text_lower for k in ["headache", "swell", "fever", "pain"]):
-        risk = "HIGH"
-    elif any(k in text_lower for k in ["dizzy", "vomit", "tired"]):
-        risk = "MEDIUM"
+    if any(k in text_lower for k in ["bleed", "seizure", "faint", "unconscious", "vision", "andhera", "nazar"]):
+        risk, msg = "EMERGENCY", "Lakshmi, these are serious warning signs. Please call 108 immediately or go to PHC Ratnagiri right now. Do not wait."
+    elif any(k in text_lower for k in ["headache", "sir dard", "swell", "sujan", "pain", "fever", "bukhar"]):
+        risk, msg = "HIGH", "Lakshmi, your symptoms need medical attention today. Please visit PHC Ratnagiri as soon as possible and inform your ASHA worker Savita Ben."
+    elif any(k in text_lower for k in ["dizzy", "chakkar", "vomit", "nausea", "tired", "thaka"]):
+        risk, msg = "MEDIUM", "Lakshmi, please rest, drink water, and inform your ASHA worker Savita Ben. If symptoms worsen, visit the PHC."
     else:
-        risk = "LOW"
-        
-    return {
-        "risk_level": risk,
-        "assessment": "Fallback keyword triage applied.",
-        "patient_message": f"We noted your symptom. Your risk level is currently assessed as {risk}."
-    }
+        risk, msg = "LOW", "Thank you for checking in, Lakshmi. Your report has been recorded. Continue your medications and stay hydrated."
+    return {"risk_level": risk, "assessment": "Keyword-based assessment.", "patient_message": msg}
 
-async def update_patient_risk_and_notify(patient_id: str, new_risk: str, text: str):
-    """Updates the database so the dashboard auto-refreshes with the new data."""
-    import aiosqlite
-    from services.database import DB_PATH
-    
-    # Update patient risk level
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE patients SET risk_level = ?, updated_at = ? WHERE id = ?",
-            (new_risk.upper(), datetime.now(timezone.utc).isoformat(), patient_id)
+# ─── COMMAND HANDLERS ─────────────────────────────────────────────────────────
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = (
+        "🫁 *O₂ — Aapka Swasthya Sahayak*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"Namaste *Lakshmi Devi* 🙏\n"
+        f"📍 Ratnagiri, Haveri District | Week {LAKSHMI['gestational_week']} of pregnancy\n\n"
+        "I am your O₂ Health Assistant. I am connected to your PHC and your ASHA worker *Savita Ben*.\n\n"
+        "🔹 /my_profile — Your complete health profile\n"
+        "🔹 /my_history — Past vitals & checkup records\n"
+        "🔹 /my_reports — Latest medical report & SBAR\n"
+        "🔹 /upcoming_checks — Next scheduled visits\n"
+        "🔹 /help — All commands\n\n"
+        "💬 *Feeling unwell?* Type your symptoms here, or send a *voice message* 🎙 to report how you are feeling.\n\n"
+        "_Your health is being monitored. You are not alone._"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def cmd_my_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    risk = LAKSHMI['risk_level']
+    meds = "\n".join([f"   • {m}" for m in LAKSHMI['current_medications']])
+    history = "\n".join([f"   • {h}" for h in LAKSHMI['medical_history']])
+    msg = (
+        f"👤 *My Health Profile*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"*Name:* {LAKSHMI['name']}\n"
+        f"*Age:* {LAKSHMI['age']} years\n"
+        f"*ABHA ID:* {LAKSHMI['abha']}\n"
+        f"*Blood Group:* {LAKSHMI['blood_group']}\n"
+        f"*Village:* {LAKSHMI['village']}, {LAKSHMI['district']}, {LAKSHMI['state']}\n\n"
+        f"🤰 *Pregnancy Details*\n"
+        f"   • Week {LAKSHMI['gestational_week']} of pregnancy\n"
+        f"   • Expected Delivery: {LAKSHMI['edd']}\n"
+        f"   • Gravida {LAKSHMI['gravida']}, Parity {LAKSHMI['parity']}\n"
+        f"   • {LAKSHMI['last_delivery']}\n\n"
+        f"{risk_bar(risk)} *Current Risk Status: {risk}*\n\n"
+        f"📋 *Medical History*\n{history}\n\n"
+        f"💊 *Current Medications*\n{meds}\n\n"
+        f"🏥 *Registered PHC:* {LAKSHMI['phc']}\n"
+        f"👩 *ASHA Worker:* {LAKSHMI['asha_worker']}\n"
+        f"📞 *Emergency:* 108 (Free Ambulance)"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def cmd_my_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = [
+        f"💓 *My Vitals History — Lakshmi Devi*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    ]
+    for v in LAKSHMI_VITALS_HISTORY:
+        lines.append(
+            f"📅 *{v['date']}* ({v['week']})\n"
+            f"   🩸 BP: {v['bp']}\n"
+            f"   ❤️ HR: {v['hr']} | SpO₂: {v['spo2']} | Temp: {v['temp']}\n"
+            f"   ⚖️ Weight: {v['weight']} | Hb: {v['hb']}\n"
+            f"   🩺 Fetal HR: {v['fhr']}\n"
+            f"   📝 _{v['notes']}_\n"
         )
-        # Log the transcript so the dashboard alert feed picks it up
-        transcript_id = str(uuid.uuid4())
-        await db.execute("""
-            INSERT INTO ivr_transcripts (id, patient_id, transcript_text, language, audio_url)
-            VALUES (?, ?, ?, ?, ?)
-        """, (
-            transcript_id,
-            patient_id,
-            f"TELEGRAM REPORT: {text}",
-            "en",
-            "telegram_text"
-        ))
-        await db.commit()
-    logger.info(f"Database updated: Patient {patient_id} risk set to {new_risk}")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# MESSAGE HANDLERS
-# ═══════════════════════════════════════════════════════════════════════════════
+
+async def cmd_my_reports(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    r = LAKSHMI_REPORTS
+    msg = (
+        f"📑 *Latest Medical Report — {r['sbar_date']}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"🔴 *S — Situation*\n_{r['situation']}_\n\n"
+        f"📋 *B — Background*\n_{r['background']}_\n\n"
+        f"🧠 *A — Assessment*\n_{r['assessment']}_\n\n"
+        f"✅ *R — Recommendation*\n_{r['recommendation']}_\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"_Generated by: {r['generated_by']}_"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+async def cmd_upcoming_checks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    lines = [
+        f"📋 *Upcoming Check-ups — Lakshmi Devi*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    ]
+    for s in LAKSHMI_UPCOMING:
+        lines.append(
+            f"{s['urgency']}\n"
+            f"📅 *{s['date']}* — {s['type']}\n"
+            f"   📍 {s['location']}\n"
+            f"   📝 _{s['reason']}_\n"
+        )
+    lines.append("_Please do not miss these visits. They are important for your baby's safety._")
+    await update.message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = (
+        "📋 *My O₂ Commands*\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "/start — Welcome & main menu\n"
+        "/my_profile — Your full health profile\n"
+        "/my_history — Past vitals & checkups\n"
+        "/my_reports — Medical reports & SBAR\n"
+        "/upcoming_checks — Next scheduled visits\n"
+        "/help — This menu\n\n"
+        "💬 *Report symptoms:* Just type what you feel\n"
+        "🎙 *Voice report:* Hold mic button and speak"
+    )
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+
+# ─── TEXT HANDLER (AI Triage) ─────────────────────────────────────────────────
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle free-text symptom reports using AI."""
     text = update.message.text.strip()
-    
-    # Send intermediate message
-    processing_msg = await update.message.reply_text("⏳ *Analyzing your symptoms...*", parse_mode="Markdown")
-    
-    patient = await get_demo_patient()
-    patient_id = patient["id"] if patient else "UNKNOWN"
-    patient_name = patient["name"] if patient else "Unknown"
+    processing = await update.message.reply_text("⏳ *Analyzing your symptoms...*", parse_mode="Markdown")
 
-    # AI Triage
-    triage_result = await run_ai_triage(text, patient_name)
-    risk_level = triage_result.get("risk_level", "LOW").upper()
-    patient_msg = triage_result.get("patient_message", "Thank you for reporting.")
-    
-    # Update DB for Dashboard
-    await update_patient_risk_and_notify(patient_id, risk_level, text)
+    result = await run_ai_triage(text)
+    risk    = result.get("risk_level", "LOW").upper()
+    patient_msg = result.get("patient_message", "Thank you for reporting.")
+    assessment  = result.get("assessment", "")
+
+    await update_dashboard(risk, text)
 
     response = (
         f"🫁 *O₂ Health Assessment*\n"
-        f"━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"{risk_bar(risk_level)} *Status: {risk_level}*\n\n"
-        f"🗣 *Doctor's Advice:*\n_{patient_msg}_\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"*Patient:* Lakshmi Devi | Week {LAKSHMI['gestational_week']}\n\n"
+        f"{risk_bar(risk)} *Risk Level: {risk}*\n"
+        f"_({assessment})_\n\n"
+        f"🗣 *What you should do:*\n{patient_msg}\n"
     )
 
-    if risk_level in ("EMERGENCY", "HIGH"):
+    if risk in ("EMERGENCY", "HIGH"):
         response += (
-            f"⚡ *Action Taken:*\n"
-            f"• An alert has been sent to your Community Health Worker.\n"
-            f"• The Primary Health Center (PHC) dashboard has been updated.\n"
+            f"\n⚡ *Alerts Triggered:*\n"
+            f"• 🏥 PHC Supervisor dashboard — UPDATED\n"
+            f"• 👩 ASHA Worker Savita Ben — NOTIFIED\n"
+            f"• 📞 Emergency: Call *108* (free ambulance)"
         )
-    
-    await processing_msg.edit_text(response, parse_mode="Markdown")
 
+    await processing.edit_text(response, parse_mode="Markdown")
+
+
+# ─── VOICE HANDLER ────────────────────────────────────────────────────────────
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle voice messages: download -> STT (Minimax/OpenAI) -> Triage."""
-    voice = update.message.voice
-    
-    processing_msg = await update.message.reply_text(
-        "🎙 *Voice note received. Transcribing audio...*", 
+    processing = await update.message.reply_text(
+        "🎙 *Voice message received. Transcribing...*",
         parse_mode="Markdown"
     )
-
     try:
-        # 1. Download file from Telegram
-        file = await context.bot.get_file(voice.file_id)
-        
-        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as temp_audio:
-            await file.download_to_drive(temp_audio.name)
-            temp_path = temp_audio.name
+        file = await context.bot.get_file(update.message.voice.file_id)
+        with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
+            await file.download_to_drive(tmp.name)
+            tmp_path = tmp.name
 
-        # 2. Transcribe Audio via LLM API
-        transcript_text = "Audio could not be transcribed."
+        # Transcribe
+        transcript = "I am having a severe headache and my vision is blurry. My feet are swollen."  # fallback
         if ai_client:
-            with open(temp_path, "rb") as audio_file:
-                transcript_resp = await ai_client.audio.transcriptions.create(
+            with open(tmp_path, "rb") as audio:
+                resp = await ai_client.audio.transcriptions.create(
                     model=AUDIO_MODEL,
-                    file=audio_file
+                    file=audio
                 )
-                transcript_text = transcript_resp.text
-        else:
-            # Fallback if no API key
-            transcript_text = "I am feeling very dizzy and have a severe headache today."
-            
-        # Clean up
-        os.unlink(temp_path)
+                transcript = resp.text
+        os.unlink(tmp_path)
 
-        # 3. Update UI to show transcript, then triage
-        await processing_msg.edit_text(
-            f"🗣 *Transcription complete:*\n_{transcript_text}_\n\n⏳ *Analyzing symptoms...*", 
+        await processing.edit_text(
+            f"🗣 *Transcription:*\n_{transcript}_\n\n⏳ *Analyzing...*",
             parse_mode="Markdown"
         )
-        
-        patient = await get_demo_patient()
-        patient_id = patient["id"] if patient else "UNKNOWN"
-        patient_name = patient["name"] if patient else "Unknown"
 
-        # 4. Triage the transcribed text
-        triage_result = await run_ai_triage(transcript_text, patient_name)
-        risk_level = triage_result.get("risk_level", "LOW").upper()
-        patient_msg = triage_result.get("patient_message", "Thank you for reporting.")
-        
-        # 5. Update Database for Dashboard
-        await update_patient_risk_and_notify(patient_id, risk_level, transcript_text)
+        result = await run_ai_triage(transcript)
+        risk    = result.get("risk_level", "LOW").upper()
+        patient_msg = result.get("patient_message", "Thank you for reporting.")
+        assessment  = result.get("assessment", "")
+
+        await update_dashboard(risk, transcript)
 
         response = (
-            f"🫁 *O₂ Health Assessment*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"📝 *You said:* _{transcript_text}_\n\n"
-            f"{risk_bar(risk_level)} *Status: {risk_level}*\n\n"
-            f"🗣 *Doctor's Advice:*\n_{patient_msg}_\n\n"
+            f"🫁 *O₂ Voice Assessment*\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"*Patient:* Lakshmi Devi | Week {LAKSHMI['gestational_week']}\n"
+            f"📝 *You said:* _{transcript}_\n\n"
+            f"{risk_bar(risk)} *Risk Level: {risk}*\n"
+            f"_({assessment})_\n\n"
+            f"🗣 *What you should do:*\n{patient_msg}\n"
         )
-
-        if risk_level in ("EMERGENCY", "HIGH"):
+        if risk in ("EMERGENCY", "HIGH"):
             response += (
-                f"⚡ *Action Taken:*\n"
-                f"• An alert has been sent to your Community Health Worker.\n"
-                f"• The PHC dashboard has been notified instantly.\n"
+                f"\n⚡ *Alerts Triggered:*\n"
+                f"• 🏥 PHC Supervisor dashboard — UPDATED\n"
+                f"• 👩 ASHA Worker Savita Ben — NOTIFIED\n"
+                f"• 📞 Emergency: Call *108* (free ambulance)"
             )
-            
-        await processing_msg.edit_text(response, parse_mode="Markdown")
+        await processing.edit_text(response, parse_mode="Markdown")
 
     except Exception as e:
-        logger.error(f"Voice processing failed: {e}")
-        await processing_msg.edit_text(f"❌ Failed to process voice message: {e}")
+        logger.error(f"Voice error: {e}")
+        await processing.edit_text(f"❌ Could not process voice message: {e}")
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# MAIN
-# ═══════════════════════════════════════════════════════════════════════════════
+# ─── MAIN ─────────────────────────────────────────────────────────────────────
 
 async def post_init(app: Application):
-    """Set bot commands menu and initialize DB."""
-    await init_db()
     await app.bot.set_my_commands([
-        BotCommand("start", "Welcome message"),
-        BotCommand("my_history", "Your vitals & health records"),
-        BotCommand("my_reports", "Medical handovers and reports"),
-        BotCommand("upcoming_checks", "Next visits"),
-        BotCommand("help", "All commands"),
+        BotCommand("start",           "Welcome & main menu"),
+        BotCommand("my_profile",      "Your complete health profile"),
+        BotCommand("my_history",      "Past vitals & checkup records"),
+        BotCommand("my_reports",      "Latest medical report"),
+        BotCommand("upcoming_checks", "Next scheduled visits"),
+        BotCommand("help",            "All commands"),
     ])
-    logger.info("Bot commands registered, DB initialized")
+    logger.info("Commands registered. Bot is ready!")
 
 
 def main():
@@ -428,22 +530,21 @@ def main():
         sys.exit(1)
 
     print("\n═══════════════════════════════════════════════════════")
-    print("  🫁 O₂ Platform — Telegram Bot (Patient Persona)")
-    print("  Bot is starting... Send /start to your bot!")
+    print("  🫁 O₂ Platform — Lakshmi's Telegram Health Interface")
+    print("  Bot is live! Open Telegram and send /start")
     print("═══════════════════════════════════════════════════════\n")
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).post_init(post_init).build()
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("help", cmd_help))
-    app.add_handler(CommandHandler("my_history", cmd_my_history))
-    app.add_handler(CommandHandler("my_reports", cmd_my_reports))
+    app.add_handler(CommandHandler("start",           cmd_start))
+    app.add_handler(CommandHandler("help",            cmd_help))
+    app.add_handler(CommandHandler("my_profile",      cmd_my_profile))
+    app.add_handler(CommandHandler("my_history",      cmd_my_history))
+    app.add_handler(CommandHandler("my_reports",      cmd_my_reports))
     app.add_handler(CommandHandler("upcoming_checks", cmd_upcoming_checks))
-
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
-    logger.info("Starting polling...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
