@@ -42,21 +42,16 @@ Handling multiple patients with vastly different risk profiles is essential for 
 
 ---
 
-## The Demo Setup: A 3-Device Ecosystem
+## The Demo Setup: A 2-Device Ecosystem
 
-For this pitch, we demonstrate the end-to-end flow of the O₂ platform using three distinct interfaces to simulate the real-world healthcare hierarchy.
+For this pitch, we demonstrate the end-to-end flow of the O₂ platform using two distinct interfaces to simulate the real-world healthcare hierarchy.
 
 ### 1. Telegram Bot (The Patient / CHW Voice Interface)
 *   **Device:** Phone 1
 *   **Role:** The entry point for symptom reporting and triage.
 *   **Demo Action:** We will use the `/switch` command to simulate multiple patients. We will send a voice note for Lakshmi (e.g., "I am having severe headaches and my vision is blurry"). The bot will instantly transcribe the audio, run a zero-hallucination AI triage, classify the patient as **HIGH RISK**, and send an alert to the PHC.
 
-### 2. O₂ Mobile App (The Field Tool)
-*   **Device:** Phone 2 (Android APK via Android Studio)
-*   **Role:** The primary offline tool for the CHW in the village.
-*   **Demo Action:** Show the localized patient list. Demonstrate how a CHW can input vitals without internet access, and how the app queues that data for background synchronization.
-
-### 3. PHC Supervisor Web Dashboard (The Command Center)
+### 2. PHC Supervisor Web Dashboard (The Command Center)
 *   **Device:** Laptop Screen
 *   **Role:** The real-time monitoring hub for the PHC Medical Officer.
 *   **Demo Action:** Watch the dashboard auto-refresh every 5 seconds. As soon as the Telegram triage happens on Phone 1, the dashboard dynamically updates to show a pulsing red alert for the high-risk patient, displaying their exact demographic details, emergency contacts, and transcribed symptoms in a live IVR feed.
@@ -139,4 +134,4 @@ pre-eclampsia. Please go to your PHC immediately.
 
 ### ✅ The Closing Statement
 
-> *"Multiple devices. One real-time loop. Zero data lost, and zero AI hallucinations. This is what O₂ does — it turns a missed emergency into a caught one. And that difference is someone's life."*
+> *"Two devices. One real-time loop. Zero AI hallucinations. This is what O₂ does — it turns a missed emergency into a caught one. And that difference is someone's life."*

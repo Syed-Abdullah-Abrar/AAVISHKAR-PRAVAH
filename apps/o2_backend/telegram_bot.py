@@ -376,7 +376,14 @@ async def process_smart_text(text: str, chat_id: str) -> list:
             temperature=0.0,
             response_format={"type": "json_object"}
         )
-        data = json.loads(response.choices[0].message.content)
+        import re
+        content = response.choices[0].message.content
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        if content.startswith("```json"):
+            content = content[7:-3].strip()
+        elif content.startswith("```"):
+            content = content[3:-3].strip()
+        data = json.loads(content)
         return data.get("extractions", []) if isinstance(data.get("extractions"), list) else []
     except:
         return []
@@ -423,7 +430,14 @@ Strict rules:
             temperature=0.0,
             response_format={"type": "json_object"}
         )
-        return json.loads(response.choices[0].message.content)
+        import re
+        content = response.choices[0].message.content
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        if content.startswith("```json"):
+            content = content[7:-3].strip()
+        elif content.startswith("```"):
+            content = content[3:-3].strip()
+        return json.loads(content)
     except Exception as e:
         logger.error(f"AI triage error: {e}")
         return fallback_triage(symptom_text, patient)
