@@ -553,37 +553,62 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown"
     )
     try:
-        # Try to download and transcribe
+        # Download the voice file from Telegram
         transcript = None
+        tmp_path = None
         try:
             voice = update.message.voice or update.message.audio
             file = await context.bot.get_file(voice.file_id)
             with tempfile.NamedTemporaryFile(suffix=".ogg", delete=False) as tmp:
                 await file.download_to_drive(tmp.name)
                 tmp_path = tmp.name
-
-            # Try AI transcription
-            if ai_client:
-                try:
-                    with open(tmp_path, "rb") as audio:
-                        resp = await ai_client.audio.transcriptions.create(
-                            model=AUDIO_MODEL,
-                            file=audio
-                        )
-                        transcript = resp.text
-                    logger.info(f"Whisper transcribed: {transcript}")
-                except Exception as te:
-                    logger.warning(f"Whisper transcription failed: {te}")
-
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
-
+            logger.info(f"Voice file downloaded: {tmp_path}")
         except Exception as dl_err:
             logger.warning(f"Voice download failed: {dl_err}")
 
-        # Fallback: use demo transcript if transcription failed
+        if tmp_path:
+            # Convert .ogg to .wav using pydub (needs ffmpeg)
+            wav_path = tmp_path.replace(".ogg", ".wav")
+            try:
+                import subprocess
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", tmp_path, "-ar", "16000", "-ac", "1", wav_path],
+                    capture_output=True, timeout=15
+                )
+                logger.info(f"Converted to WAV: {wav_path}")
+            except Exception as conv_err:
+                logger.warning(f"FFmpeg conversion failed: {conv_err}")
+                wav_path = None
+
+            # Transcribe using Google Speech Recognition (FREE — no API key)
+            if wav_path and os.path.exists(wav_path):
+                try:
+                    import speech_recognition as sr
+                    recognizer = sr.Recognizer()
+                    with sr.AudioFile(wav_path) as source:
+                        audio_data = recognizer.record(source)
+                    # Try English first, then Hindi
+                    try:
+                        transcript = recognizer.recognize_google(audio_data, language="en-IN")
+                    except sr.UnknownValueError:
+                        try:
+                            transcript = recognizer.recognize_google(audio_data, language="hi-IN")
+                        except sr.UnknownValueError:
+                            logger.warning("Google STT couldn't understand audio")
+                    if transcript:
+                        logger.info(f"Google STT transcribed: {transcript}")
+                except Exception as stt_err:
+                    logger.warning(f"Google STT failed: {stt_err}")
+
+            # Cleanup temp files
+            for f in [tmp_path, wav_path]:
+                try:
+                    if f and os.path.exists(f):
+                        os.unlink(f)
+                except:
+                    pass
+
+        # Fallback only if everything failed
         if not transcript:
             transcript = "I am having a severe headache and my vision is blurry. My feet are very swollen."
             logger.info("Using demo fallback transcript")
