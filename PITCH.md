@@ -71,44 +71,23 @@ For this pitch, we demonstrate the end-to-end flow of the O₂ platform using tw
 
 ---
 
-### 📱 Step 2 — The Distress Call (Phone 1 — Telegram)
+### 📱 Step 2 — Patient 1: Lakshmi's Distress Call (Voice)
 **[Pick up Phone 1 and show it to the audience]**
 
-> *"It's 11pm. Lakshmi Devi is alone at home and something feels wrong. She doesn't know medical terminology. But she has WhatsApp/Telegram — and she has O₂."*
+> *"It's 11pm. Lakshmi Devi is alone at home and something feels wrong. She doesn't know medical terminology. But she has Telegram — and she has O₂."*
 
 **Action:** Open Telegram on Phone 1. Ensure active patient is Lakshmi via `/switch`. Press and hold the microphone button. **Speak the following:**
 
 > 🎙 *"Mujhe bahut tez sir dard ho raha hai aur aankhon ke saamne andhera aa raha hai. Pair bhi sujan gaye hain."*
 > *(Translation: "I have a very severe headache and my vision is going dark. My feet are also swollen.")*
 
-Send the message. Show the bot's immediate transcription process.
+Send the message. Show the bot's immediate transcription and AI triage process.
+
+> *"O₂ instantly transcribes her voice, strictly analyzes the symptoms against her stored medical history — her borderline hemoglobin, her gestational hypertension — and classifies this as HIGH RISK. It advises her to go to the PHC immediately."*
 
 ---
 
-### 🤖 Step 3 — The AI Triage (Phone 1 — Telegram Response)
-**[Read out the bot's response to the audience]**
-
-> *"O₂ instantly transcribes her voice, strictly analyzes the symptoms against her stored medical history — her borderline hemoglobin, her gestational hypertension — and classifies this as..."*
-
-The bot responds:
-```text
-🔴 Status: HIGH RISK
-
-🗣 Doctor's Advice:
-Lakshmi, the symptoms you've described — severe headache,
-blurry vision, and swelling — are serious warning signs of
-pre-eclampsia. Please go to your PHC immediately.
-
-⚡ Alerts Triggered:
-• 🏥 PHC Supervisor dashboard — UPDATED
-• 👩 ASHA Worker Savita Ben — NOTIFIED
-```
-
-> *"In under 3 seconds. No doctor required. Completely zero-hallucination."*
-
----
-
-### 🖥️ Step 4 — The Magic Moment (Laptop Dashboard)
+### 🖥️ Step 3 — The Dashboard Reacts (Laptop)
 **[Turn dramatically to the laptop screen]**
 
 > *"And now, look at what just happened on the Supervisor's dashboard — automatically."*
@@ -119,18 +98,33 @@ pre-eclampsia. Please go to your PHC immediately.
 
 ---
 
-### 📱 Step 5 — The Multi-Patient Reality
+### 📱 Step 4 — Patient 2: Fatima's Emergency (Text Message)
 **[Pick up Phone 1 again]**
 
 > *"But emergencies don't happen one at a time. What if Fatima Begum, another patient with Gestational Diabetes, suddenly feels reduced fetal movements?"*
 
-**Action:** Type `/switch` in Telegram and select **Fatima Begum**. Type: *"I haven't felt my baby move since morning."*
+**Action:** Type `/switch` in Telegram and select **Fatima Begum**. Type the following message and send: 
 
-> *"O₂ instantly shifts its medical context. It evaluates Fatima's unique history and immediately flashes an 🚨 EMERGENCY alert on the dashboard."*
+> 💬 *"I haven't felt my baby move since morning."*
 
-**Action:** Show the dashboard instantly updating with Fatima's emergency alert.
+> *"O₂ instantly shifts its medical context. It evaluates Fatima's unique history (Week 36, previous C-Section, Gestational Diabetes) and immediately flashes an 🚨 EMERGENCY alert on the dashboard, advising immediate hospital transfer."*
+
+**Action:** Show the dashboard instantly updating with Fatima's emergency alert and red IVR notification.
 
 ---
+
+### 📱 Step 5 — Patient 3: Savitri's Medium Risk (Routine Update)
+**[Keep Phone 1 visible]**
+
+> *"Finally, let's look at a routine but critical update. Savitri Naik is at Week 24 and suffering from severe anemia."*
+
+**Action:** Type `/switch` in Telegram and select **Savitri Naik**. Type the following text:
+
+> 💬 *"I am feeling very dizzy today and vomited twice."*
+
+> *"Because Savitri's history indicates severe anemia but no immediate fatal danger signs, the AI correctly categorizes this as 🟡 MEDIUM Risk. It offers reassuring advice to rest and hydrate, while still updating the dashboard so the PHC can monitor her during her upcoming IV iron infusion."*
+
+**Action:** Show the dashboard reflecting Savitri's updated Medium Risk status.
 
 ### ✅ The Closing Statement
 
