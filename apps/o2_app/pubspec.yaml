@@ -40,7 +40,7 @@ dependencies:
   json_annotation: ^4.9.0
   
   # Voice I/O
-  record: ^5.1.2
+
   audioplayers: ^6.1.0
 
   # Location / GPS

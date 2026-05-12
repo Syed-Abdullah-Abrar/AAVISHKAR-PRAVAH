@@ -134,12 +134,3 @@ enum RiskLevel {
   final String displayName;
   final String color;
 }
-
-/// Sync Status
-enum SyncStatus {
-  idle,
-  syncing,
-  success,
-  failed,
-  offline,
-}

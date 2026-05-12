@@ -60,7 +60,10 @@ class O2App extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final router = O2Router(ref: ref).router;
+    final router = O2Router(
+      patientRepository: ref.watch(patientRepositoryProvider),
+      vitalsRepository: ref.watch(vitalsRepositoryProvider),
+    ).router;
     return MaterialApp.router(
       title: 'O₂ Platform',
       debugShowCheckedModeBanner: false,
