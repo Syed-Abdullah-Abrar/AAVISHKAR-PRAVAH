@@ -591,7 +591,7 @@ class _PatientListScreenState extends State<PatientListScreen> {
                                   'ABHA: ${patient.abhaId}',
                                 ),
                                 trailing: const Icon(Icons.chevron_right),
-                                onTap: () => context.push('/patients/${patient.fhirId}'),
+                                onTap: () => context.push('/patients/${patient.id}'),
                               ),
                             );
                           },
@@ -1180,8 +1180,8 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                             ),
                             _InfoRow(
                               label: 'EDD Date',
-                              value: _patient!.eddDate != null
-                                  ? '${_patient!.eddDate!.day}/${_patient!.eddDate!.month}/${_patient!.eddDate!.year}'
+                              value: _patient!.edd != null
+                                  ? '${_patient!.edd!.day}/${_patient!.edd!.month}/${_patient!.edd!.year}'
                                   : '—',
                             ),
                             _InfoRow(label: 'Gravida', value: '${_patient!.gravida ?? "—"}'),
@@ -1222,7 +1222,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen> {
                             child: ListTile(
                               leading: const CircleAvatar(child: Icon(Icons.monitor_heart)),
                               title: Text('${v.vitalType}: ${v.value} ${v.unit ?? ""}'),
-                              subtitle: Text('${v.recordedAt.day}/${v.recordedAt.month}/${v.recordedAt.year}'),
+                              subtitle: Text('${v.recordedAt?.day ?? 0}/${v.recordedAt?.month ?? 0}/${v.recordedAt?.year ?? 0}'),
                             ),
                           )),
                     const SizedBox(height: 32),

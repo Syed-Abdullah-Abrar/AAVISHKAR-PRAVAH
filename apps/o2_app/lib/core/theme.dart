@@ -75,7 +75,7 @@ class O2Theme {
           color: textOnPrimary,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         color: backgroundCard,
         elevation: 2,
         shape: RoundedRectangleBorder(
@@ -205,6 +205,33 @@ class O2Theme {
           fontSize: 14,
           fontWeight: FontWeight.w600,
           color: textPrimary,
+        ),
+      ),
+    );
+  }
+
+  static ThemeData get darkTheme {
+    return ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: primaryGreen,
+        brightness: Brightness.dark,
+        primary: primaryGreenLight,
+        secondary: secondaryOrangeLight,
+      ),
+      scaffoldBackgroundColor: backgroundDark,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Color(0xFF1A1A1A),
+        foregroundColor: textOnDark,
+        elevation: 0,
+        centerTitle: true,
+      ),
+      cardTheme: CardThemeData(
+        color: const Color(0xFF2C2C2C),
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
         ),
       ),
     );
