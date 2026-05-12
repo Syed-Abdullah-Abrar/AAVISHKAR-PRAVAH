@@ -198,6 +198,195 @@ class FhirSerializer {
     return R4.Bundle.fromJson(json) as R4.Bundle;
   }
 
+  // ─── Hospital Referral Export ─────────────────────────────────────────────
+
+  /// Generate comprehensive FHIR Bundle for hospital referral.
+  ///
+  /// This is the "send to hospital" export — contains everything
+  /// a receiving facility needs to immediately continue care:
+  /// - Patient demographics + ABHA
+  /// - Complete vitals history (all observations)
+  /// - Risk assessment summary
+  /// - SBAR handover document
+  /// - Obstetric history (gravida, parity, LMP, complications)
+  ///
+  /// FHIR DocumentReference is the appropriate container for
+  /// clinical handover in India ABDM ecosystem.
+  R4.Bundle generateHospitalReferralBundle({
+    required Patient patient,
+    required List<Vitals> vitalsHistory,
+    required String riskLevel,
+    required int riskScore,
+    required String sbarContent,
+    required String referringChwId,
+    String? referralReason,
+  }) {
+    final entries = <R4.BundleEntry>[];
+
+    // 1. Patient resource
+    entries.add(R4.BundleEntry(
+      resource: patient.toFhir(),
+      request: R4.BundleRequest(
+        method: R4.HTTPMethod.put,
+        url: 'Patient/${patient.fhirId}',
+      ),
+    ));
+
+    // 2. All vital observations
+    for (final vital in vitalsHistory) {
+      entries.add(R4.BundleEntry(
+        resource: vital.toFhir(),
+        request: R4.BundleRequest(
+          method: R4.HTTPMethod.post,
+          url: 'Observation',
+        ),
+      ));
+    }
+
+    // 3. Risk Assessment as Observation
+    final riskObservation = R4.Observation(
+      id: 'risk-assessment-${patient.fhirId}',
+      status: R4.ObservationStatus.final_,
+      category: [
+        R4.CodeableConcept(
+          coding: [
+            R4.Coding(
+              system: 'http://terminology.hl7.org/CodeSystem/observation-category',
+              code: 'risk',
+              display: 'Risk Assessment',
+            ),
+          ],
+        ),
+      ],
+      code: R4.CodeableConcept(
+        coding: [
+          R4.Coding(
+            system: 'http://loinc.org',
+            code: '9911001',
+            display: 'Maternal risk assessment',
+          ),
+        ],
+      ),
+      subject: R4.Reference(reference: 'Patient/${patient.fhirId}'),
+      effectiveDateTime: DateTime.now(),
+      valueString: 'Risk Level: $riskLevel, Score: $riskScore',
+      interpretation: [
+        R4.CodeableConcept(
+          coding: [
+            R4.Coding(
+              code: riskLevel == 'EMERGENCY' ? 'H' :
+                   riskLevel == 'HIGH' ? 'H' :
+                   riskLevel == 'MEDIUM' ? 'M' : 'N',
+              display: riskLevel,
+            ),
+          ],
+        ),
+      ],
+    );
+    entries.add(R4.BundleEntry(
+      resource: riskObservation,
+      request: R4.BundleRequest(
+        method: R4.HTTPMethod.post,
+        url: 'Observation',
+      ),
+    ));
+
+    // 4. SBAR DocumentReference
+    final sbarJson = jsonEncode({
+      'risk_level': riskLevel,
+      'risk_score': riskScore,
+      'content': sbarContent,
+      'referral_reason': referralReason,
+    });
+    entries.add(R4.BundleEntry(
+      resource: createSbarDocument(
+        patientId: patient.fhirId,
+        sbarContent: sbarContent,
+        authorId: referringChwId,
+        sbarJson: sbarJson,
+      ),
+      request: R4.BundleRequest(
+        method: R4.HTTPMethod.post,
+        url: 'DocumentReference',
+      ),
+    ));
+
+    // 5. Referral Composition
+    final composition = R4.Composition(
+      id: 'referral-${patient.fhirId}-${DateTime.now().millisecondsSinceEpoch}',
+      status: R4.CompositionStatus.final_,
+      type: R4.CodeableConcept(
+        coding: [
+          R4.Coding(
+            system: 'http://loinc.org',
+            code: '60568-2',
+            display: 'Referral note',
+          ),
+        ],
+      ),
+      subject: R4.Reference(reference: 'Patient/${patient.fhirId}'),
+      date: DateTime.now(),
+      author: [
+        R4.Reference(reference: 'Practitioner/$referringChwId'),
+      ],
+      title: 'O2 Platform Maternal Health Referral',
+      section: [
+        R4.CompositionSection(
+          title: 'Patient Demographics',
+          code: R4.CodeableConcept(
+            coding: [R4.Coding(code: 'DEM', display: 'Demographics')],
+          ),
+          text: R4.Narrative(
+            div: '<div>Name: ${patient.name}<br/>ABHA: ${patient.abhaId}<br/>Age: ${patient.age}<br/>Phone: ${patient.phoneNumber}</div>',
+          ),
+        ),
+        R4.CompositionSection(
+          title: 'Risk Summary',
+          code: R4.CodeableConcept(
+            coding: [R4.Coding(code: 'RSK', display: 'Risk')],
+          ),
+          text: R4.Narrative(
+            div: '<div>Risk Level: $riskLevel<br/>Score: $riskScore<br/>Recommendation: ${_riskRecommendation(riskLevel)}</div>',
+          ),
+        ),
+        R4.CompositionSection(
+          title: 'Vitals History',
+          code: R4.CodeableConcept(
+            coding: [R4.Coding(code: 'VIT', display: 'Vitals')],
+          ),
+          text: R4.Narrative(
+            div: '<div>${vitalsHistory.length} records</div>',
+          ),
+        ),
+      ],
+    );
+    entries.add(R4.BundleEntry(
+      resource: composition,
+      request: R4.BundleRequest(
+        method: R4.HTTPMethod.post,
+        url: 'Composition',
+      ),
+    ));
+
+    return R4.Bundle(
+      id: 'referral-bundle-${DateTime.now().millisecondsSinceEpoch}',
+      type: R4.BundleType.document,
+      timestamp: DateTime.now(),
+      entry: entries,
+      total: entries.length,
+      meta: R4.Meta(lastUpdated: DateTime.now()),
+    );
+  }
+
+  String _riskRecommendation(String level) {
+    switch (level) {
+      case 'EMERGENCY': return 'Call 108 / Immediate referral';
+      case 'HIGH': return 'Urgent follow-up within 24h';
+      case 'MEDIUM': return 'Schedule follow-up within 48h';
+      default: return 'Routine care';
+    }
+  }
+
   // ─── SBAR Document ───────────────────────────────────────────────────────
 
   /// Create FHIR DocumentReference for SBAR handover document

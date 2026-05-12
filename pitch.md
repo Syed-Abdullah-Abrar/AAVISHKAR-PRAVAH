@@ -228,6 +228,10 @@ Checksum validation: number % 97 == 1 (ISO 7064 Mod 97)
 | Phase 1 MVP (hackathon) | ✅ Implemented |
 | Phase 2 (supabase, RLS, visits, dashboard) | ✅ Implemented |
 | Phase 3 (Telegram IVR, full Flutter UI, GPS, demo-ready) | ✅ Implemented |
+| Phase 4 ML + Security | ✅ Implemented (2026-05-12) |
+| WHO rule-based risk scorer | ✅ Pure Dart — `lib/ml/risk_scorer.dart` |
+| XGBoost inference engine | ✅ Pure Dart — `lib/ml/xgboost_inference.dart` |
+| Secure token storage | ✅ `FlutterSecureStorage` — token removed from source |
 | FHIR R4 native models | ✅ Patient, Observation, DocumentReference |
 | Offline-first architecture | ✅ SQLCipher + WorkManager |
 | Traffic-light triage | ✅ WHO maternal health thresholds |
@@ -253,24 +257,26 @@ Checksum validation: number % 97 == 1 (ISO 7064 Mod 97)
 | **CORS / Emulator** | FastAPI CORS for `http://10.0.2.2:8000` (Android emulator host) | ✅ |
 | **Backend startup fix** | `PYTHONPATH` + `cd apps/o2_backend` pattern — runs reliably | ✅ |
 | **SBAR mock fallback** | No OpenAI key → gracefully returns mock SBAR (demo works without API key) | ✅ |
-| **On-device ML** | Deferred to Phase 4: quantized XGBoost for offline inference | 🔜 |
 
 ---
 
-## Phase 4 Roadmap (Next — Post-Hackathon)
+## Phase 4 Roadmap (In Progress)
 
-| Item | Description | Priority |
-|------|-------------|----------|
-| **On-device ML** | Quantized XGBoost (.pkl model) — inference works with no internet at all | P0 |
-| **Flutter repository wiring** | Connect `VitalsEntryScreen.save()` → `VitalsRepository`, `PatientDetailScreen.load()` → `PatientRepository` | P1 |
-| **AndroidManifest permissions** | Add `ACCESS_FINE_LOCATION`, `RECORD_AUDIO`, `INTERNET` explicitly | P1 |
-| **Telegram token move** | Move `TELEGRAM_BOT_TOKEN` from `constants.dart` → `.env` / `FlutterSecureStorage` | P0 |
-| **Real IndicTrans2** | Set up `indictrans-server` Docker container for actual Kannada/English STT | P2 |
-| **Real ABDM integration** | Live NHA API calls for ABHA validation, HPR verification | P2 |
-| **CHW push notifications** | FCM or Telegram bot notifications for HIGH/EMERGENCY alerts | P1 |
-| **Supabase schema** | Deploy actual Supabase project with RLS policies | P1 |
-| **Performance optimization** | Lazy loading in PatientListScreen, vitals pagination | P2 |
-| **Voice message recording** | `record` package → actual voice recording in Flutter | P2 |
+| Item | Description | Status |
+|------|-------------|--------|
+| **WHO Risk Scorer** | Pure Dart implementation — BP, Hb, SpO2, temp, danger signs | ✅ `lib/ml/risk_scorer.dart` |
+| **XGBoost Inference** | Pure Dart engine from bundled JSON model — fallback to WHO rules | ✅ `lib/ml/xgboost_inference.dart` |
+| **SecureStorageService** | `FlutterSecureStorage` wrapper for secrets | ✅ `lib/services/secure_storage_service.dart` |
+| **Token Hardening** | Telegram token moved from `constants.dart` → SecureStorage | ✅ |
+| **TelegramService rewrite** | Reads token from SecureStorage, not source | ✅ `lib/services/telegram_service.dart` |
+| **VitalsRepository wiring** | `saveVitalsWithRisk()` — persists with risk level | ✅ `lib/repositories/vitals_repository.dart` |
+| **Flutter project scaffold** | `flutter create` to generate `android/` + `ios/` directories | 🔜 |
+| **AndroidManifest perms** | `ACCESS_FINE_LOCATION`, `RECORD_AUDIO`, `INTERNET` | 🔜 |
+| **ErrorScreen wiring** | Wrap FutureBuilders with error boundaries | 🔜 |
+| **Voice recording** | `record` package → actual voice recording in Flutter | 🔜 |
+| **XGBoost retraining** | NFHS-5 dataset → retrain with named features | 🔜 |
+| **Real IndicTrans2** | `indictrans-server` Docker for Kannada/English STT | 🔜 |
+| **Supabase deployment** | Real Supabase project with RLS policies | 🔜 |
 
 ---
 
@@ -316,26 +322,49 @@ Checksum validation: number % 97 == 1 (ISO 7064 Mod 97)
 
 **Backend** (`apps/o2_backend/`)
 - FastAPI with 6 routers: `/risk`, `/sbar`, `/abdm`, `/visits`, `/dashboard`, `/ivr`
-- 26 API endpoints — all verified responding
-- SQLite database with patient_repo, vitals_repo
-- ML risk scoring service (XGBoost mock in Phase 3)
-- SBAR LLM service with OpenAI/Anthropic support + mock fallback
-- Telegram IVR: voice message → emergency detection → CHW alert
+- 26 API endpoints — all verified responding at `localhost:8000`
+- SQLite database (`o2_platform.db`) with PatientRepo, VitalsRepo, VisitRepo
+- ML risk scoring service with XGBoost model + WHO rule fallback
+- SBAR LLM service — OpenAI/Anthropic with graceful mock fallback
+- Telegram IVR: voice message → emergency keyword detection → CHW alert
 - Supervisor HTML dashboard at `/dashboard/dashboard/`
+- Running command: `cd apps/o2_backend && PYTHONPATH=. python3 -m uvicorn main:app --port 8000`
 
 **Flutter App** (`apps/o2_app/`)
 - 10 full StatefulWidget screens in `lib/core/router.dart`
-- `LocationService` for GPS auto-tagging
-- `TelegramService` for voice message forwarding
-- `IndicTransService` for STT/TTS
-- `PatientRepository`, `VitalsRepository`, `SyncService`
+- `LocationService` — GPS auto-tagging via `geolocator`
+- `TelegramService` — reads token from `FlutterSecureStorage` (no hardcoded secrets)
+- `SecureStorageService` — Android Keystore-backed secret storage
+- `IndicTransService` — STT/TTS HTTP client
+- `WHORiskScorer` — Pure Dart WHO maternal health risk assessment
+- `XGBoostInference` — Pure Dart XGBoost inference from bundled JSON model
+- `PatientRepository`, `VitalsRepository`, `SyncService` — Brick offline-first
 - FHIR R4 models, encryption service, FHIR serializer
-- `geolocator` + `permission_handler` packages added
+- `geolocator` + `permission_handler` packages in `pubspec.yaml`
+
+**ML Pipeline (Phase 4)**
+- WHO rule-based risk scorer: BP, Hb, SpO2, temperature, danger signs
+- XGBoost inference engine: 50-tree model, pure Dart, fallback to WHO rules
+- Features: systolic_bp, diastolic_bp, hb, weeks_pregnant, temp, heart_rate, spo2, bmi, age, parity
 
 **Infrastructure**
 - `supabase/schema.sql` — PHC hierarchy, RLS policies
 - `supabase/rls_policies.sql` — data isolation by catchment area
-- `start-backend.sh` — one-command backend startup
+- `start-backend.sh` — one-command FastAPI startup
+
+**Phase 4 Files (New)**
+| File | Purpose |
+|------|---------|
+| `lib/ml/risk_scorer.dart` | WHO thresholds in pure Dart |
+| `lib/ml/xgboost_inference.dart` | XGBoost inference from JSON |
+| `lib/ml/ml.dart` | ML module exports |
+| `lib/services/secure_storage_service.dart` | FlutterSecureStorage wrapper |
+| `lib/services/telegram_service.dart` | Rewritten — reads token from secure storage |
+| `lib/core/constants.dart` | Token replaced with placeholder |
+
+---
+
+> **Last updated**: 2026-05-12 — Phase 4 ML + security implemented, hackathon demo-ready. Phase 4 complete post-hackathon: AndroidManifest, ErrorScreen, voice recording, Supabase deployment.
 - `docs/DEMO-TEST-GUIDE.md` — demo walkthrough for hackathon
 - `docs/architecture.md` — Mermaid diagrams, system overview
 

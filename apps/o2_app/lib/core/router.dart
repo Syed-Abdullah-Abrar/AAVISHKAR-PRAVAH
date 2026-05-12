@@ -2037,7 +2037,7 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
           ],
 
           // ─── Telegram IVR Option ───────────────────────────────────────────
-          if (_patientId != null && _transcript == null) ...[
+          if (widget.patientId != null && _transcript == null) ...[
             const SizedBox(height: 24),
             Card(
               child: Padding(
@@ -2121,12 +2121,12 @@ class _VoiceInputScreenState extends State<VoiceInputScreen> {
   }
 
   Future<void> _sendToIvr() async {
-    if (_transcript == null || _patientId == null) return;
+    if (_transcript == null || widget.patientId == null) return;
     try {
       final telegramService = TelegramService();
       await telegramService.sendMessage(
         'chw-001', // TODO: Get actual CHW ID
-        'Voice transcript from patient $_patientId: $_transcript',
+        'Voice transcript from patient ${widget.patientId}: $_transcript',
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

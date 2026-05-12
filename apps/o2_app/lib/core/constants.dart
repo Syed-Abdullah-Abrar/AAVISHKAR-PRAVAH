@@ -34,7 +34,10 @@ class O2Constants {
   static const String ivrBackendUrl = 'http://10.0.2.2:8000';
 
   // ─── Telegram Bot ──────────────────────────────────────────────────────────
-  static const String telegramBotToken = '8717671171:AAEmr0UNaBRuZvRoHeJ5SYMdd87N1-xFZYg';
+  // ⚠️ SECURITY: Token moved to FlutterSecureStorage in Phase 4
+  // Read via: await SecureStorageService().getTelegramToken()
+  // NEVER store real tokens in source code — they go in .env or SecureStorage
+  static const String telegramBotTokenPlaceholder = '<TELEGRAM_BOT_TOKEN>';
 
   // ─── Bhashini — replaced by IndicTrans2 Docker + IndicTransService ───────────
   // Keep stubs for API shape — replace calls with IndicTransService in Phase 3
@@ -55,7 +58,7 @@ class O2Constants {
   static const String fhirBaseUrl = 'https://hl7.org/fhir/R4/';
 
   // ─── Bhashini Voice Config ───────────────────────────────────────────────────
-  static const String bhashiniBaseUrl = 'https://api.bhashini.gov.in';
+  // bhashiniBaseUrl defined above in stubs section
   static const String bhashiniSTTEndpoint = '/asr/v1';
   static const String bhashiniTTSEndpoint = '/tts/v1';
 

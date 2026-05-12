@@ -180,6 +180,45 @@ class VitalsRepository extends RemoteRepository<Vitals>
     return unsynced.length;
   }
 
+  // ─── Risk Assessment ────────────────────────────────────────────────────────
+
+  /// Save vitals AND run risk assessment in one call.
+  /// Returns the saved vital with risk level attached.
+  Future<Vitals> saveVitalsWithRisk({
+    required String patientFhirId,
+    required String vitalType,
+    required String value,
+    required String unit,
+    required String recordedBy,
+    required String source,
+    String? notes,
+    double? locationLat,
+    double? locationLng,
+    required String riskLevel,
+    required int riskScore,
+  }) async {
+    final vital = Vitals(
+      fhirId: 'obs-${DateTime.now().millisecondsSinceEpoch}',
+      patientFhirId: patientFhirId,
+      vitalType: vitalType,
+      value: value,
+      unit: unit,
+      recordedBy: recordedBy,
+      recordedAt: DateTime.now(),
+      source: source,
+      notes: notes,
+      locationLat: locationLat,
+      locationLng: locationLng,
+      deviceId: null,
+      isSynced: false,
+      syncAttempts: 0,
+      createdAt: DateTime.now(),
+      clinicalFlag: riskLevel,
+    );
+    await upsert(vital);
+    return vital;
+  }
+
   // ─── FHIR Bundle Support ─────────────────────────────────────────────────
 
   /// Get all vitals for patient as FHIR Bundle

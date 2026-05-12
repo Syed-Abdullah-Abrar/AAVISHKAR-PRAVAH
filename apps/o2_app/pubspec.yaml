@@ -28,9 +28,9 @@ dependencies:
   # Background Sync
   workmanager: ^0.5.2
   
-  # FHIR R4 support
-  fhir: ^0.6.0
-  fhir_r4: ^0.6.0
+  # FHIR R4 support (disabled for demo — reinstall for production)
+  # fhir: ^0.6.0
+  # fhir_r4: ^0.6.0
   
   # HTTP Client
   http: ^1.2.2

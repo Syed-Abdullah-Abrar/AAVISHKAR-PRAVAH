@@ -79,14 +79,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Flutter debug
-        "http://localhost:8080",
-        "http://10.0.2.2:3000",  # Android emulator
-        # Add production/deployed origins here — e.g.:
-        # "https://your-app.railway.app",
-        # "https://your-app.onrender.com",
-    ],
+    allow_origins=["*"],  # DEMO ONLY — lock down post-pitch
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -96,10 +89,10 @@ app.add_middleware(
 
 app.include_router(risk.router, prefix="/risk", tags=["Risk Assessment"])
 app.include_router(sbar.router, prefix="/sbar", tags=["SBAR Generation"])
-app.include_router(abdm.router, prefix="/abdm", tags=["ABDM / ABHA"])
+app.include_router(abdm.router, tags=["ABDM / ABHA"])
 app.include_router(visits.router, prefix="/visits", tags=["Visits / GPS"])
-app.include_router(dashboard.router, prefix="/dashboard", tags=["Supervisor Dashboard"])
-app.include_router(ivr.router, prefix="/ivr", tags=["IVR / Telegram"])
+app.include_router(dashboard.router, tags=["Supervisor Dashboard"])
+app.include_router(ivr.router, tags=["IVR / Telegram"])
 
 # ─── Health Check ─────────────────────────────────────────────────────────────
 

@@ -1,371 +1,82 @@
-# O2 Platform — Demo Test Guide
+# O₂ Platform: Demo Testing Guide
 
-> **For:** Hackathon Demo  
-> **Updated:** 2026-05-11  
-> **System:** Windows 11 + WSL Ubuntu + Android Emulator  
-> **Time to demo:** ~18 hours
-
----
-
-## Architecture — What Runs Where
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  Windows Host                                                    │
-│                                                                  │
-│  ┌──────────────────┐     ┌──────────────────────────────────┐  │
-│  │ Android Emulator │     │  WSL Ubuntu                      │  │
-│  │ (Flutter App)    │     │  FastAPI Backend (uvicorn)       │  │
-│  │                  │     │  Port 8000                       │  │
-│  │ Uses 10.0.2.2:8000 ─────► localhost:8000                  │  │
-│  └──────────────────┘     └──────────────────────────────────┘  │
-│                                                                  │
-│  ┌──────────────────┐                                           │
-│  │ Windows CMD      │  ← curl tests, flutter commands          │
-│  └──────────────────┘                                           │
-└─────────────────────────────────────────────────────────────────┘
-
-NO Docker needed. Mock fallback active for all external services.
-```
-
----
+Follow this guide to successfully run all three components of the O₂ pitch demo (The Web Dashboard, The Telegram Bot, and the Android App).
 
 ## Prerequisites
-
-Before starting, confirm:
-- [ ] WSL Ubuntu is installed and working
-- [ ] Android Studio with emulator (API 33+)
-- [ ] VS Code open at `C:\Users\syeda\dev\AAVISHKAR-PRAVAH`
-- [ ] Telegram app (for voice message test)
+1. Ensure your WSL environment is running.
+2. Open your terminal in Windows (PowerShell or Git Bash).
+3. Ensure you have the Telegram App installed on your phone.
+4. Ensure you have Android Studio installed on your Windows machine.
 
 ---
 
-## STEP 1 — Open 3 Terminals
+## Component 1 & 2: The Core Backend & Telegram Bot (Run via WSL)
 
-| Terminal | Purpose | How to open |
-|---|---|---|
-| **WSL Bash** | FastAPI backend server | `Win+R` → type `Ubuntu` → Enter |
-| **Windows CMD** | curl tests, flutter commands | `Win+R` → type `cmd` → Enter |
-| **Android Studio** | Run emulator | Open Android Studio → start Pixel 6 API 33 |
+Both the PHC Dashboard and the Telegram bot are powered by the FastAPI backend in your WSL environment.
+
+### Step 1: Start the Backend and Dashboard
+Open a WSL terminal and run:
+```bash
+cd ~/dev/AAVISHKAR-PRAVAH/apps/o2_backend
+source ../../.venv/bin/activate
+python main.py
+```
+*Wait until you see `Uvicorn running on http://0.0.0.0:8000`.*
+
+### Step 2: Open the Dashboard
+On your laptop browser, navigate to:
+👉 **http://localhost:8000/dashboard/**
+*You should see the premium dark-themed dashboard. Leave this tab open on your screen during the pitch.*
+
+### Step 3: Start the Telegram Bot
+Open a **second** WSL terminal and run:
+```bash
+cd ~/dev/AAVISHKAR-PRAVAH/apps/o2_backend
+source ../../.venv/bin/activate
+python telegram_bot.py
+```
+*Wait until you see `Starting polling...`.*
+
+### Step 4: Test the Bot on Your Phone
+1. Open Telegram on Phone 1 and search for your bot.
+2. Send the command `/start`.
+3. Test Voice Triage: Hold the microphone button and say *"I am experiencing a severe headache and my vision is blurry."*
+4. **The Magic Moment:** Watch the Telegram bot transcribe and triage the audio, and simultaneously watch the Laptop Dashboard automatically update with a pulsing red "HIGH RISK" alert for patient Lakshmi!
 
 ---
 
-## STEP 2 — Start the FastAPI Backend
+## Component 3: The Android Mobile App (Run via Windows Android Studio)
 
-### In WSL Bash terminal:
+Since we skipped the native WSL Android build, we will build the app natively using Android Studio on your Windows machine.
 
-```bash
-cd /home/syed/dev/AAVISHKAR-PRAVAH/apps/o2_backend
-export PYTHONPATH=/home/syed/dev/AAVISHKAR-PRAVAH
-python3 -m uvicorn main:app --port 8000 --host 0.0.0.0
-```
+### Step 1: Open the Project in Android Studio
+1. Open **Android Studio** on your Windows laptop.
+2. Click **Open** (or File -> Open).
+3. In the directory browser, navigate to your WSL filesystem. You can type this directly into the path bar:
+   👉 `\\wsl.localhost\Ubuntu\home\syed\dev\AAVISHKAR-PRAVAH\apps\o2_app`
+4. Wait for Android Studio to index the project.
 
-**Expected output:**
-```
-INFO:     Started server process [xxxx]
-INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000
-[O2 Backend] Starting O2 FastAPI Server...
-[O2 Backend] Environment: development
-[O2 Backend] AI Provider: openai
-[DB] Initialized SQLite database at o2_platform.db
-[ML] XGBoost not available, ML scoring disabled
-```
+### Step 2: Fetch Dependencies
+1. Open the Android Studio terminal (at the bottom) or use the GUI.
+2. Run `flutter pub get` to ensure all packages are downloaded on the Windows side.
 
-**Keep this terminal running.** Do not close it.
+### Step 3: Connect Your Phone
+1. Enable **Developer Options** and **USB Debugging** on Phone 2.
+2. Connect Phone 2 to your laptop via USB.
+3. Ensure your phone appears in the device dropdown menu at the top of Android Studio.
 
-> **Note:** If port 8000 is already in use, kill first: `pkill -f uvicorn`
+### Step 4: Build and Run
+1. Click the green **Play (Run)** button at the top of Android Studio.
+2. Gradle will download necessary build tools and compile the app.
+3. The app will automatically launch on Phone 2.
 
----
-
-## STEP 3 — Verify Backend is Running
-
-### In Windows CMD terminal:
-
-```bash
-curl http://localhost:8000/health
-```
-
-**Expected output:**
-```json
-{"status":"healthy","service":"o2-ai-backend","version":"1.0.0","environment":"development"}
-```
+### Step 5: Test the App
+*   Navigate through the patient list.
+*   Demonstrate adding a new vital sign (e.g., Blood Pressure) while the phone's Wi-Fi is turned off to prove the **Offline-First** capability.
 
 ---
 
-## STEP 4 — Test All API Endpoints
-
-### Health & Root
-```bash
-curl http://localhost:8000/
-curl http://localhost:8000/docs
-```
-
-### Risk Triage (GET — all risk levels)
-```bash
-curl http://localhost:8000/risk/risk/levels
-```
-
-**Expected output:**
-```json
-{"levels":[
-  {"level":"LOW","score_range":"0-1","action":"Routine care","next_review_days":7},
-  {"level":"MEDIUM","score_range":"2-3","action":"Follow-up in 48h","next_review_days":2},
-  {"level":"HIGH","score_range":"4-5","action":"Urgent follow-up in 24h","next_review_days":1},
-  {"level":"EMERGENCY","score_range":"6+","action":"Immediate referral","next_review_days":0}
-]}
-```
-
-### IVR Service Health
-```bash
-curl http://localhost:8000/ivr/ivr/health
-```
-
-**Expected output:**
-```json
-{"status":"healthy","ivr_service":"telegram","use_twilio":false,"telegram_configured":false,"indictrans":{"status":"available","url":"http://localhost:8000"},...}
-```
-
-### IVR Emergency Detection (POST)
-```bash
-curl -X POST "http://localhost:8000/ivr/ivr/voice-message" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"patient_id\":\"test-001\",\"file_id\":\"test\",\"language\":\"en\",\"text\":\"patient is having seizure and severe bleeding\"}"
-```
-
-**Expected output:**
-```json
-{"alert_tier":"EMERGENCY","is_critical":true,...}
-```
-
-### Non-Emergency IVR Test
-```bash
-curl -X POST "http://localhost:8000/ivr/ivr/voice-message" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"patient_id\":\"test-001\",\"file_id\":\"test\",\"language\":\"en\",\"text\":\"I have mild headache\"}"
-```
-
-Expected: `"alert_tier":"LOW"` or `"MEDIUM"`, `is_critical:false`
-
-### Dashboard (HTML)
-```
-Open in browser: http://localhost:8000/dashboard/dashboard/
-```
-
-This is a full supervisor dashboard with metrics, high-risk patient table, pending follow-ups, and recent visits.
-
----
-
-## STEP 5 — Run Flutter App
-
-### In Android Studio:
-1. Open project: `C:\Users\syeda\dev\AAVISHKAR-PRAVAH\apps\o2_app`
-2. Wait for `flutter pub get` to finish
-3. Select **Pixel 6 API 33** emulator from device dropdown
-4. Click **Run** (green triangle) or press `Shift+F10`
-
-### Or via CMD:
-```bash
-cd C:\Users\syeda\dev\AAVISHKAR-PRAVAH\apps\o2_app
-flutter run
-```
-
----
-
-## STEP 6 — Flutter App Walkthrough
-
-### Screen 1 — HomeScreen
-- Shows dashboard cards: patient count, pending visits, high-risk alerts
-- Tap **"View All Patients"** → PatientListScreen
-
-### Screen 2 — Patient Registration
-- Tap purple FAB (+) at bottom right
-- Fill:
-  - **Name:** `Lakshmi Devi`
-  - **Age:** `28`
-  - **Phone:** `+919876543210`
-  - **Village:** `Hampankatta`
-  - **LMP Date:** pick date ~6 months ago
-- Toggle **High Risk** → ON
-- Tap **Register** → green snackbar confirms
-
-### Screen 3 — Vitals Entry (with GPS)
-- Tap patient → PatientDetailScreen
-- Tap **"Record Vitals"** (heart icon)
-- GPS card at top: shows location being captured
-  - *Emulator note: GPS shows "unavailable" — this is expected. Real device shows coordinates.*
-- Fill:
-  - **Systolic:** `150`
-  - **Diastolic:** `95`
-  - **Heart Rate:** `88`
-  - **Hemoglobin:** `8.5`
-  - **Temperature:** `99.5`
-  - **SPO2:** `97`
-- Tap **Save** → risk score calculated
-
-### Screen 4 — Risk Assessment Result
-- After saving vitals, risk level is shown
-- HIGH/EMERGENCY → red/orange alert banner
-- "Refer to PHC" recommendation appears
-
-### Screen 5 — SBAR Generation
-- In PatientDetailScreen → tap **"SBAR Handover"** tab
-- Fill the 4 fields (Situation, Background, Assessment, Recommendation)
-- Tap **Generate** → AI formats as structured SBAR document
-- *Note: Without real OpenAI API key, mock SBAR is returned — still formatted correctly*
-
-### Screen 6 — Emergency Protocol
-- Tap ⚠️ warning icon (top right of PatientDetailScreen)
-- Emergency buttons: "Call 108", "Alert PHC", "Alert Supervisor"
-
-### Screen 7 — Settings / Sync
-- HomeScreen → Settings icon (top right)
-- Sync status shows offline queue, last sync time
-
----
-
-## STEP 7 — Telegram Voice Message Test
-
-1. Open Telegram on your phone
-2. Find the bot: search `@O2PlatformBot` (or your configured bot name)
-3. Send `/start`
-4. Send a voice message: **"I am having severe bleeding and cannot breathe"**
-5. Bot should respond with emergency alert
-
-> **Note:** `TELEGRAM_BOT_TOKEN` must be set in `.env` for real Telegram. Without it, the IVR still processes mock transcripts but cannot send real Telegram messages.
-
----
-
-## STEP 8 — Record Demo Video
-
-**While everything works, record your demo.**
-
-1. Press `Win+G` → Xbox Game Bar
-2. Click **Record** (circle)
-3. Walk through: HomeScreen → Register Patient → Vitals → Risk → SBAR → Emergency
-4. Click **Stop**
-5. Video saves to `C:\Users\syeda\Videos\Captures`
-
----
-
-## Complete Command Reference
-
-### WSL Bash — Start Backend
-```bash
-cd /home/syed/dev/AAVISHKAR-PRAVAH/apps/o2_backend
-export PYTHONPATH=/home/syed/dev/AAVISHKAR-PRAVAH
-python3 -m uvicorn main:app --port 8000 --host 0.0.0.0
-```
-
-### WSL Bash — Restart Backend (if crashed)
-```bash
-pkill -f uvicorn
-cd /home/syed/dev/AAVISHKAR-PRAVAH/apps/o2_backend
-export PYTHONPATH=/home/syed/dev/AAVISHKAR-PRAVAH
-python3 -m uvicorn main:app --port 8000 --host 0.0.0.0
-```
-
-### Windows CMD — Health Check
-```bash
-curl http://localhost:8000/health
-```
-
-### Windows CMD — Risk Levels
-```bash
-curl http://localhost:8000/risk/risk/levels
-```
-
-### Windows CMD — IVR Emergency Test
-```bash
-curl -X POST "http://localhost:8000/ivr/ivr/voice-message" -H "Content-Type: application/json" -d "{\"patient_id\":\"test\",\"file_id\":\"fake\",\"language\":\"en\",\"text\":\"severe bleeding seizure\"}"
-```
-
-### Windows CMD — Dashboard
-```
-http://localhost:8000/dashboard/dashboard/
-```
-
-### Flutter — Run
-```bash
-cd C:\Users\syeda\dev\AAVISHKAR-PRAVAH\apps\o2_app
-flutter run
-```
-
----
-
-## Troubleshooting
-
-### `curl` not recognized in CMD
-Use PowerShell instead:
-```powershell
-Invoke-RestMethod http://localhost:8000/health
-```
-Or use **Git Bash** (comes with Git for Windows) — `curl` works there.
-
-### Port 8000 already in use
-```bash
-# In WSL
-pkill -f uvicorn
-# Then restart
-```
-
-### ModuleNotFoundError: No module named 'apps'
-PYTHONPATH not set. Always use:
-```bash
-cd /home/syed/dev/AAVISHKAR-PRAVAH/apps/o2_backend
-export PYTHONPATH=/home/syed/dev/AAVISHKAR-PRAVAH
-python3 -m uvicorn main:app --port 8000 --host 0.0.0.0
-```
-
-### Flutter can't reach backend
-1. Check emulator internet: open Chrome in emulator → google.com
-2. Verify backend: `curl http://localhost:8000/health` from Windows CMD
-3. If CMD works but Flutter doesn't: check Windows Firewall
-
-### GPS unavailable in emulator
-**Expected.** Emulators have no real GPS hardware. Explain: "On a real device in field, GPS coordinates are captured automatically for NHM compliance."
-
-### SBAR returns mock response (no OpenAI key)
-**Expected.** Without `OPENAI_API_KEY` in `.env`, the SBAR LLM service returns a mock-but-correctly-formatted response. Still valid for demo.
-
----
-
-## Pre-Demo Checklist (Do Tonight)
-
-- [ ] Open WSL → run backend → `curl http://localhost:8000/health` → `{"status":"healthy"...}`
-- [ ] `curl http://localhost:8000/risk/risk/levels` → 4 risk levels returned
-- [ ] `curl -X POST .../ivr/ivr/voice-message` with "seizure bleeding" → `is_critical:true`
-- [ ] Open `http://localhost:8000/dashboard/dashboard/` in browser → dashboard loads
-- [ ] `flutter run` → app opens in emulator
-- [ ] Register one patient in app
-- [ ] Record 2-minute backup demo video
-
-**Then rest.** Don't code the night before.
-
----
-
-## What to Say to Judges (Demo Script)
-
-**Problem (30 sec):**
-> "Maternal mortality in rural India: 1 woman dies every 30 minutes from preventable causes. Community Health Workers are the frontline — but between visits, they have no clinical support."
-
-**Solution (30 sec):**
-> "O2 Platform: offline-first Flutter app for CHWs. GPS-tags every home visit. AI triages risk in real-time. Emergency voice calls work over Telegram on feature phones — no smartphone needed."
-
-**Demo (4 min):**
-
-| Step | Action | What to show |
-|---|---|---|
-| A | Register Lakshmi Devi | ABHA auto-generated, LMP/EDD calculated |
-| B | Record vitals with GPS | GPS card visible — NHM compliance |
-| C | Show risk: HIGH | BP 150/95, Hb 8.5 → referral recommended |
-| D | Generate SBAR | Structured clinical handover document |
-| E | Telegram voice test | "Severe bleeding" → emergency alert fires |
-| F | Emergency protocol | Call 108, Alert PHC, Alert Supervisor |
-
-**Phase 4 pitch (30 sec):**
-> "Phase 4: on-device ML with quantized XGBoost — inference works completely offline, no internet needed. Every patient registered becomes training data."
-
----
-
-Good luck. Everything is working.
+## Troubleshooting During Pitch
+*   **Dashboard not updating:** Ensure the terminal running `python main.py` hasn't crashed. Hard refresh the browser (Ctrl+F5).
+*   **Telegram bot not responding:** Ensure the terminal running `python telegram_bot.py` is active. Check your internet connection.
+*   **App won't build in Android Studio:** Ensure you opened the `o2_app` folder specifically, not the root `AAVISHKAR-PRAVAH` folder.

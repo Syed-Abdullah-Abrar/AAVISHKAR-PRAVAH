@@ -80,17 +80,84 @@ class Patient extends SqliteModel
   @JsonKey(name: 'emergency_contact_phone')
   final String? emergencyContactPhone;
 
+  // ─── Obstetric / Maternal History ────────────────────────────────────────────
+  // Cross-referenced with WHO Maternal Health Guidelines (9789240080591)
+
   @JsonKey(name: 'lmp_date')
   final DateTime? lmpDate;
 
-  @JsonKey(name: 'edd_date')
-  final DateTime? eddDate;
+  @JsonKey(name: 'edd')
+  final DateTime? edd;
+
+  @JsonKey(name: 'gravida')
+  final int? gravida;
 
   @JsonKey(name: 'parity')
   final int? parity;
 
-  @JsonKey(name: 'gravida')
-  final int? gravida;
+  @JsonKey(name: 'live_births')
+  final int? liveBirths;
+
+  @JsonKey(name: 'stillbirths')
+  final int? stillbirths;
+
+  @JsonKey(name: 'abortions')
+  final int? abortions;
+
+  @JsonKey(name: 'previous_complications')
+  final String? previousComplications;
+
+  @JsonKey(name: 'last_delivery_outcome')
+  final String? lastDeliveryOutcome;
+
+  @JsonKey(name: 'last_delivery_place')
+  final String? lastDeliveryPlace;
+
+  @JsonKey(name: 'last_delivery_type')
+  final String? lastDeliveryType;
+
+  @JsonKey(name: 'breastfeeding_previous')
+  final bool? breastfedPreviously;
+
+  @JsonKey(name: 'menarche_age')
+  final int? menarcheAge;
+
+  @JsonKey(name: 'menstrual_cycle_regular')
+  final bool? menstrualCycleRegular;
+
+  @JsonKey(name: 'contraception_history')
+  final String? contraceptionHistory;
+
+  @JsonKey(name: 'current_contraception')
+  final String? currentContraception;
+
+  // ─── Medical / Surgical History ──────────────────────────────────────────────
+
+  @JsonKey(name: 'known_allergies')
+  final String? knownAllergies;  // JSON array
+
+  @JsonKey(name: 'chronic_conditions')
+  final String? chronicConditions;  // JSON array: ["diabetes", "hypertension", "thyroid"]
+
+  @JsonKey(name: 'surgical_history')
+  final String? surgicalHistory;  // JSON array
+
+  @JsonKey(name: 'blood_transfusion_history')
+  final bool? bloodTransfusionHistory;
+
+  @JsonKey(name: 'blood_group')
+  final String? bloodGroup;  // 'A+', 'B+', 'O+', 'AB+', etc.
+
+  // ─── Family / Social History ─────────────────────────────────────────────────
+
+  @JsonKey(name: 'family_history')
+  final String? familyHistory;  // JSON array: ["diabetes_mother", "preeclampsia_sister"]
+
+  @JsonKey(name: 'family_planning_interest')
+  final bool? familyPlanningInterest;
+
+  @JsonKey(name: 'unmet_need_contraception')
+  final bool? unmetNeedContraception;
 
   @JsonKey(name: 'high_risk_pregnancy')
   @Default(false)
@@ -140,9 +207,29 @@ class Patient extends SqliteModel
     this.emergencyContactName,
     this.emergencyContactPhone,
     this.lmpDate,
-    this.eddDate,
-    this.parity,
+    this.edd,
     this.gravida,
+    this.parity,
+    this.liveBirths,
+    this.stillbirths,
+    this.abortions,
+    this.previousComplications,
+    this.lastDeliveryOutcome,
+    this.lastDeliveryPlace,
+    this.lastDeliveryType,
+    this.breastfedPreviously,
+    this.menarcheAge,
+    this.menstrualCycleRegular,
+    this.contraceptionHistory,
+    this.currentContraception,
+    this.knownAllergies,
+    this.chronicConditions,
+    this.surgicalHistory,
+    this.bloodTransfusionHistory,
+    this.bloodGroup,
+    this.familyHistory,
+    this.familyPlanningInterest,
+    this.unmetNeedContraception,
     this.highRiskPregnancy = false,
     this.riskLevel,
     this.lastVisitDate,
