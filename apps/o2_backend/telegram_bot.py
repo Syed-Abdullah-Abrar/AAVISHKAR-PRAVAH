@@ -51,12 +51,7 @@ MINIMAX_API_KEY    = os.getenv("MINIMAX_API_KEY", "")
 
 try:
     from openai import AsyncOpenAI
-    if OPENAI_API_KEY:
-        ai_client  = AsyncOpenAI(api_key=OPENAI_API_KEY)
-        LLM_MODEL  = "gpt-4o-mini"
-        AUDIO_MODEL = "whisper-1"
-        logger.info("Using OpenAI GPT-4o-mini")
-    elif MINIMAX_API_KEY:
+    if MINIMAX_API_KEY:
         ai_client  = AsyncOpenAI(
             api_key=MINIMAX_API_KEY,
             base_url="https://api.minimaxi.chat/v1"
@@ -64,6 +59,11 @@ try:
         LLM_MODEL  = "abab6.5s-chat"
         AUDIO_MODEL = "speech-01"
         logger.info("Using Minimax LLM")
+    elif OPENAI_API_KEY:
+        ai_client  = AsyncOpenAI(api_key=OPENAI_API_KEY)
+        LLM_MODEL  = "gpt-4o-mini"
+        AUDIO_MODEL = "whisper-1"
+        logger.info("Using OpenAI GPT-4o-mini")
     else:
         ai_client = None
         logger.warning("No AI API key found — using fallback triage")
