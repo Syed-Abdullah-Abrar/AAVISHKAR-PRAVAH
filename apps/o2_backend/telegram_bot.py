@@ -394,15 +394,15 @@ Current Medications: {', '.join(patient['current_medications'])}
     if not ai_client:
         return fallback_triage(symptom_text, patient)
 
-    system_prompt = f'''You are the O2 Maternal Health AI Triage system.
+    system_prompt = f'''You are the O2 Maternal Health AI Assistant.
 Patient context:
 {context}
 
 Analyze the reported symptoms and return ONLY valid JSON:
 {{
   "risk_level": "LOW|MEDIUM|HIGH|EMERGENCY",
-  "assessment": "Brief clinical explanation (1-2 sentences, referencing her history). DO NOT hallucinate info not in history.",
-  "patient_message": "A warm, reassuring but clear message directly to the patient. In English."
+  "assessment": "Brief clinical explanation (1-2 sentences, referencing her history). DO NOT hallucinate info not in history. FOR INTERNAL DASHBOARD.",
+  "patient_message": "A fully complete, natural, and empathetic reply directly to the patient. Address them by name. Act as their caring health assistant. Explain what you think is happening based on their symptoms and history, and clearly tell them what to do next. Do not sound like a robot. Use emojis appropriately. Use simple Markdown (*bold*, _italic_)."
 }}
 
 Strict rules:
@@ -622,20 +622,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update_dashboard(get_patient_key(chat_id), risk, text)
 
-    response = (
-        f"🫁 *O₂ Triage Assessment*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"*Patient:* {patient['name']} | Week {patient['gestational_week']}\n\n"
-        f"{risk_bar(risk)} *Risk Level: {risk}*\n"
-        f"_({assessment})_\n\n"
-        f"🗣 *What you should do:*\n{patient_msg}\n"
-    )
+    response = f"{patient_msg}\n\n"
     if risk in ("EMERGENCY", "HIGH"):
         response += (
-            f"\n⚡ *Alerts Triggered:*\n"
-            f"• 🏥 PHC Supervisor dashboard — UPDATED\n"
-            f"• 👩 ASHA Worker {patient['asha_worker']} — NOTIFIED\n"
-            f"• 📞 Emergency: Call *108* (free ambulance)"
+            f"🚨 *SYSTEM ALERTS TRIGGERED:*\n"
+            f"• 🏥 PHC Supervisor dashboard updated: *{risk} Risk*\n"
+            f"• 👩 ASHA Worker {patient['asha_worker']} notified\n"
+            f"• 📞 Please call *108* for a free ambulance if needed."
         )
     await processing.edit_text(response, parse_mode="Markdown")
 
@@ -694,21 +687,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await update_dashboard(get_patient_key(chat_id), risk, transcript)
 
-        response = (
-            f"🫁 *O₂ Voice Assessment*\n"
-            f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"*Patient:* {patient['name']} | Week {patient['gestational_week']}\n"
-            f"📝 *You said:* _{transcript}_\n\n"
-            f"{risk_bar(risk)} *Risk Level: {risk}*\n"
-            f"_({assessment})_\n\n"
-            f"🗣 *What you should do:*\n{patient_msg}\n"
-        )
+        response = f"{patient_msg}\n\n"
         if risk in ("EMERGENCY", "HIGH"):
             response += (
-                f"\n⚡ *Alerts Triggered:*\n"
-                f"• 🏥 PHC Supervisor dashboard — UPDATED\n"
-                f"• 👩 ASHA Worker {patient['asha_worker']} — NOTIFIED\n"
-                f"• 📞 Emergency: Call *108*"
+                f"🚨 *SYSTEM ALERTS TRIGGERED:*\n"
+                f"• 🏥 PHC Supervisor dashboard updated: *{risk} Risk*\n"
+                f"• 👩 ASHA Worker {patient['asha_worker']} notified\n"
+                f"• 📞 Please call *108* for a free ambulance if needed."
             )
         await processing.edit_text(response, parse_mode="Markdown")
 
@@ -720,11 +705,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             risk = result.get("risk_level", "EMERGENCY")
             msg = result.get("patient_message", "Please go to PHC immediately.")
             await processing.edit_text(
-                f"🫁 *O₂ Voice Assessment*\n"
-                f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"*Patient:* {patient['name']} | Week {patient['gestational_week']}\n\n"
-                f"{risk_bar(risk)} *Risk Level: {risk}*\n\n"
-                f"🗣 *What you should do:*\n{msg}",
+                f"{msg}\n\n🚨 *SYSTEM ALERTS TRIGGERED:*\n• 🏥 PHC dashboard updated: *{risk} Risk*",
                 parse_mode="Markdown"
             )
         except:
