@@ -22,23 +22,23 @@ O₂ is an offline-first, AI-driven maternal healthcare platform designed specif
 
 #### 1. True Offline-First Architecture
 O₂ is built for environments where the internet is a luxury, not a given. 
-- **How it works:** The Flutter mobile app uses a robust local SQLite database (via Brick ORM). CHWs can log vitals, GPS-tagged visits, and clinical notes completely offline. 
+- **How it works:** The Flutter mobile app uses a robust local SQLite database. CHWs can log vitals, GPS-tagged visits, and clinical notes completely offline. 
 - **The Impact:** When connectivity returns (e.g., when the CHW returns to the PHC), the app seamlessly background-syncs with the central server. No data is ever lost due to a dropped connection.
 
 #### 2. Voice-Native Triage (Breaking the Literacy Barrier)
 Typing out complex medical symptoms in English is not viable for a patient in distress or an overworked ASHA worker.
-- **How it works:** O₂ integrates advanced Speech-to-Text (STT) capabilities (powered by Bhashini/IndicTrans/OpenAI Whisper APIs) directly into popular messaging platforms like Telegram. A user simply speaks their symptoms in their native language.
-- **The Impact:** The audio is transcribed, translated, and instantly fed into the O₂ AI engine for clinical triage. This democratizes access to expert-level assessment.
+- **How it works:** O₂ integrates resilient, free-tier Speech-to-Text (STT) capabilities directly into popular messaging platforms like Telegram. A user simply speaks their symptoms in their native language (e.g., Hindi or English).
+- **The Impact:** The audio is transcribed instantly. If network connection completely fails, the system executes a secure fallback logic, ensuring emergencies are still escalated.
 
-#### 3. AI-Powered Predictive Risk Engine
-Data is useless if it isn't actionable. O₂ doesn't just store vitals; it analyzes them.
-- **How it works:** A machine learning model (XGBoost) continually evaluates longitudinal patient data (blood pressure trends, symptoms, demographics). When the Telegram bot receives a symptom report (e.g., "severe headache and swelling"), an LLM immediately classifies the risk level (LOW, MEDIUM, HIGH, EMERGENCY).
-- **The Impact:** The system automatically alerts the PHC Supervisor via the web dashboard and advises the patient/CHW on the immediate next steps. It removes the guesswork from critical triage decisions.
+#### 3. AI-Powered Predictive Risk Engine (Zero Hallucination)
+Data is useless if it isn't actionable, and dangerous if it is hallucinated.
+- **How it works:** Our AI triage engine is strictly guarded (Temperature = 0.0) against inventing symptoms. When the Telegram bot receives a report (e.g., "severe headache and swelling"), the LLM immediately cross-references the patient's *exact* historical profile to classify the risk level (LOW, MEDIUM, HIGH, EMERGENCY).
+- **The Impact:** The system automatically alerts the PHC Supervisor via the web dashboard and advises the patient/CHW on immediate next steps. It removes the guesswork from critical triage decisions.
 
-#### 4. Automated SBAR Handovers
-When an emergency occurs, the handover between the village CHW and the district hospital is often chaotic, leading to fatal errors.
-- **How it works:** At the tap of a button, O₂'s LLM synthesizes the patient's entire clinical history, recent vitals, and current symptoms into a standardized, structured **SBAR** document (Situation, Background, Assessment, Recommendation).
-- **The Impact:** The receiving doctor gets a concise, professional medical brief instantly, drastically reducing the "delay in receiving adequate care."
+#### 4. Scalable Multi-Patient Simulation
+Handling multiple patients with vastly different risk profiles is essential for a true PHC environment.
+- **How it works:** The O₂ bot dynamically switches context between patients. A single interface manages records for high-risk pre-eclampsia (Lakshmi), gestational diabetes with fetal distress (Fatima), and severe anemia (Savitri).
+- **The Impact:** The receiving doctor gets a concise, personalized medical brief instantly, tailored specifically to that patient's unique history.
 
 ---
 
@@ -49,7 +49,7 @@ For this pitch, we demonstrate the end-to-end flow of the O₂ platform using th
 ### 1. Telegram Bot (The Patient / CHW Voice Interface)
 *   **Device:** Phone 1
 *   **Role:** The entry point for symptom reporting and triage.
-*   **Demo Action:** We will send a voice note or text (e.g., "I am having severe headaches and my vision is blurry"). The bot will instantly transcribe the audio, run an AI triage, classify the patient as **HIGH RISK**, and send an alert to the PHC.
+*   **Demo Action:** We will use the `/switch` command to simulate multiple patients. We will send a voice note for Lakshmi (e.g., "I am having severe headaches and my vision is blurry"). The bot will instantly transcribe the audio, run a zero-hallucination AI triage, classify the patient as **HIGH RISK**, and send an alert to the PHC.
 
 ### 2. O₂ Mobile App (The Field Tool)
 *   **Device:** Phone 2 (Android APK via Android Studio)
@@ -59,67 +59,57 @@ For this pitch, we demonstrate the end-to-end flow of the O₂ platform using th
 ### 3. PHC Supervisor Web Dashboard (The Command Center)
 *   **Device:** Laptop Screen
 *   **Role:** The real-time monitoring hub for the PHC Medical Officer.
-*   **Demo Action:** Watch the dashboard auto-refresh. As soon as the Telegram triage happens on Phone 1, the dashboard will dynamically update to show a pulsing red alert for the new high-risk patient, displaying their exact GPS location and transcribed symptoms.
+*   **Demo Action:** Watch the dashboard auto-refresh every 5 seconds. As soon as the Telegram triage happens on Phone 1, the dashboard dynamically updates to show a pulsing red alert for the high-risk patient, displaying their exact demographic details, emergency contacts, and transcribed symptoms in a live IVR feed.
 
 ---
 
-## 🎬 Live Demo Story: "Lakshmi's Emergency"
+## 🎬 Live Demo Story: "A Night at the PHC"
 
 > This is the scripted on-stage narrative. Each step maps to a real device action.
-
-### The Character: Lakshmi Devi
-**28 years old | Village: Ratnagiri | Week 32 of pregnancy | Currently: LOW risk**
-
-Lakshmi is a first-time mother registered at PHC-001. Her ASHA worker (CHW) last visited her 6 days ago and recorded normal vitals. Her history — hemoglobin borderline at 10.2 g/dL, mild gestational hypertension — is fully stored in the O₂ database.
-
----
 
 ### 🖥️ Step 1 — Set the Stage (Laptop Dashboard)
 **[Show the laptop screen to the audience]**
 
-> *"This is the PHC Supervisor's command center. Right now, she is monitoring 4 patients across her district. You can see Lakshmi here — currently LOW risk. Everything looks calm."*
+> *"This is the PHC Supervisor's command center. Right now, she is monitoring her district. You can see the patient table showing multiple expecting mothers — Lakshmi, Fatima, and Savitri. Everything looks calm."*
 
-**Action:** Point to Lakshmi's patient card on the dashboard showing LOW risk, last visit 6 days ago.
+**Action:** Point to the dashboard showing patients at LOW or MEDIUM risk, displaying their age, gender, and registered PHC.
 
 ---
 
 ### 📱 Step 2 — The Distress Call (Phone 1 — Telegram)
 **[Pick up Phone 1 and show it to the audience]**
 
-> *"It's 11pm. Lakshmi is alone at home and something feels wrong. She doesn't have the Supervisor's phone number. She doesn't know medical terminology. But she has WhatsApp — and she has O₂."*
+> *"It's 11pm. Lakshmi Devi is alone at home and something feels wrong. She doesn't know medical terminology. But she has WhatsApp/Telegram — and she has O₂."*
 
-**Action:** Open Telegram on Phone 1. Press and hold the microphone button. **Speak the following:**
+**Action:** Open Telegram on Phone 1. Ensure active patient is Lakshmi via `/switch`. Press and hold the microphone button. **Speak the following:**
 
 > 🎙 *"Mujhe bahut tez sir dard ho raha hai aur aankhon ke saamne andhera aa raha hai. Pair bhi sujan gaye hain."*
 > *(Translation: "I have a very severe headache and my vision is going dark. My feet are also swollen.")*
 
-**OR if typing:** Type — *"Severe headache, blurry vision, feet swollen, feeling very weak."*
-
-Send the message. Show the bot's immediate response to the audience.
+Send the message. Show the bot's immediate transcription process.
 
 ---
 
 ### 🤖 Step 3 — The AI Triage (Phone 1 — Telegram Response)
 **[Read out the bot's response to the audience]**
 
-> *"O₂ instantly transcribes her voice, analyzes the symptoms against her stored medical history — her borderline hemoglobin, her gestational hypertension — and classifies this as..."*
+> *"O₂ instantly transcribes her voice, strictly analyzes the symptoms against her stored medical history — her borderline hemoglobin, her gestational hypertension — and classifies this as..."*
 
 The bot responds:
-```
+```text
 🔴 Status: HIGH RISK
 
 🗣 Doctor's Advice:
 Lakshmi, the symptoms you've described — severe headache,
 blurry vision, and swelling — are serious warning signs of
-pre-eclampsia. Please go to your PHC immediately. Do not
-wait until morning.
+pre-eclampsia. Please go to your PHC immediately.
 
-⚡ Action Taken:
-• An alert has been sent to your Community Health Worker.
-• The PHC dashboard has been notified instantly.
+⚡ Alerts Triggered:
+• 🏥 PHC Supervisor dashboard — UPDATED
+• 👩 ASHA Worker Savita Ben — NOTIFIED
 ```
 
-> *"In under 3 seconds. No doctor required. No internet needed on the patient's end beyond Telegram."*
+> *"In under 3 seconds. No doctor required. Completely zero-hallucination."*
 
 ---
 
@@ -128,21 +118,25 @@ wait until morning.
 
 > *"And now, look at what just happened on the Supervisor's dashboard — automatically."*
 
-**Action:** The dashboard has auto-refreshed. Lakshmi's card has changed from **🟢 LOW** to **🔴 HIGH RISK** with a pulsing red alert animation. The alert feed shows her transcribed message and timestamp.
+**Action:** The dashboard has auto-refreshed. Lakshmi's row has changed from **🟢 LOW** to **🔴 HIGH RISK**. The live Alert Feed on the right shows her transcribed Telegram message instantly. 
 
-> *"The Medical Officer didn't need a phone call. She didn't need to wait. She already knows. She is already dispatching the ASHA worker."*
+> *"The Medical Officer didn't need a phone call. She can click on Lakshmi's name, see her emergency contact details instantly, and dispatch the ASHA worker."*
 
 ---
 
-### 📱 Step 5 — The CHW in the Field (Phone 2 — Flutter App)
-**[Pick up Phone 2 with the Flutter app open]**
+### 📱 Step 5 — The Multi-Patient Reality
+**[Pick up Phone 1 again]**
 
-> *"Meanwhile, the ASHA worker assigned to Lakshmi opens her O₂ app. Even if she's in a village with no signal, her offline app has already received the alert queue. She can see Lakshmi's full medical history, her previous vitals, and the AI-generated referral summary — right here."*
+> *"But emergencies don't happen one at a time. What if Fatima Begum, another patient with Gestational Diabetes, suddenly feels reduced fetal movements?"*
 
-**Action:** Show the patient list on the Flutter app. Tap on Lakshmi's profile to show her medical history.
+**Action:** Type `/switch` in Telegram and select **Fatima Begum**. Type: *"I haven't felt my baby move since morning."*
+
+> *"O₂ instantly shifts its medical context. It evaluates Fatima's unique history and immediately flashes an 🚨 EMERGENCY alert on the dashboard."*
+
+**Action:** Show the dashboard instantly updating with Fatima's emergency alert.
 
 ---
 
 ### ✅ The Closing Statement
 
-> *"Three devices. One real-time loop. Zero data lost. This is what O₂ does — it turns a missed emergency into a caught one. And that difference is someone's life."*
+> *"Multiple devices. One real-time loop. Zero data lost, and zero AI hallucinations. This is what O₂ does — it turns a missed emergency into a caught one. And that difference is someone's life."*
