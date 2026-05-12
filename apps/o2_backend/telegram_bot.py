@@ -56,7 +56,7 @@ try:
             api_key=MINIMAX_API_KEY,
             base_url="https://api.minimaxi.chat/v1"
         )
-        LLM_MODEL  = "abab6.5s-chat"
+        LLM_MODEL  = "minimax-m2.7"
         AUDIO_MODEL = "speech-01"
         logger.info("Using Minimax LLM")
     elif OPENAI_API_KEY:
