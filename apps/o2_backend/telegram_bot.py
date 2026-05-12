@@ -239,21 +239,39 @@ async def update_dashboard(new_risk: str, transcript: str):
         import aiosqlite
         from services.database import DB_PATH
         async with aiosqlite.connect(DB_PATH) as db:
-            # Update patient risk
+            # Ensure updated_at column exists (add if missing)
+            try:
+                await db.execute("ALTER TABLE patients ADD COLUMN updated_at TEXT")
+                logger.info("Added updated_at column to patients table")
+            except:
+                pass  # column already exists
+
+            # Update patient risk level
             await db.execute(
                 "UPDATE patients SET risk_level = ?, updated_at = ? WHERE LOWER(name) LIKE '%lakshmi%'",
                 (new_risk.upper(), datetime.now(IST).isoformat())
             )
-            # Log the IVR transcript so dashboard alert feed shows it
+
+            # Log the transcript as IVR record
             await db.execute("""
-                INSERT OR IGNORE INTO ivr_transcripts (id, patient_id, transcript_text, language, audio_url)
+                INSERT INTO ivr_transcripts (id, patient_id, transcript_text, language, audio_url)
                 SELECT ?, id, ?, 'en', 'telegram'
                 FROM patients WHERE LOWER(name) LIKE '%lakshmi%' LIMIT 1
             """, (str(uuid.uuid4()), f"TELEGRAM REPORT: {transcript}"))
+
             await db.commit()
-        logger.info(f"Dashboard updated → Lakshmi risk: {new_risk}")
+
+            # Verify the update
+            cursor = await db.execute(
+                "SELECT risk_level FROM patients WHERE LOWER(name) LIKE '%lakshmi%'"
+            )
+            row = await cursor.fetchone()
+            if row:
+                logger.info(f"✅ Dashboard updated → Lakshmi risk now: {row[0]}")
+            else:
+                logger.warning("⚠️ Lakshmi not found in patients table!")
     except Exception as e:
-        logger.warning(f"Dashboard sync skipped: {e}")
+        logger.error(f"Dashboard sync FAILED: {e}", exc_info=True)
 
 
 async def save_patient_note(note_type: str, content: str, extra: dict = None):

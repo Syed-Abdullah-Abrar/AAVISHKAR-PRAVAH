@@ -8,8 +8,9 @@ import os
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 from datetime import datetime
+import aiosqlite
 
-from services.database import patient_repo, visit_repo, schedule_repo, vitals_repo
+from services.database import patient_repo, visit_repo, schedule_repo, vitals_repo, DB_PATH
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -80,6 +81,35 @@ async def get_patient_vitals(patient_id: str):
     """Get vitals history for a patient."""
     vitals = await vitals_repo.list_by_patient(patient_id, limit=10)
     return {"patient_id": patient_id, "vitals": vitals, "count": len(vitals)}
+
+
+@router.get("/api/alerts/live")
+async def get_live_alerts():
+    """Get real-time alerts from Telegram IVR transcripts + high-risk patients."""
+    alerts = []
+    try:
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            # Get recent IVR transcripts (from Telegram bot)
+            cursor = await db.execute("""
+                SELECT t.id, t.transcript_text, t.language, p.name, p.risk_level, p.id as patient_id
+                FROM ivr_transcripts t
+                JOIN patients p ON p.id = t.patient_id
+                ORDER BY t.id DESC
+                LIMIT 20
+            """)
+            rows = await cursor.fetchall()
+            for row in rows:
+                alerts.append({
+                    "id": row["id"],
+                    "patient_name": row["name"],
+                    "risk_level": row["risk_level"],
+                    "message": row["transcript_text"],
+                    "source": "telegram",
+                })
+    except Exception as e:
+        pass
+    return {"alerts": alerts, "count": len(alerts)}
 
 
 # ─── HTML Dashboard ─────────────────────────────────────────────────────────────
@@ -475,20 +505,45 @@ DASHBOARD_HTML = """
                 if (allPats.patients.length === 0) {
                     patEl.innerHTML = '<div class="empty-state">No registered patients</div>';
                 } else {
+                    function calcAge(dob) {
+                        if (!dob) return '—';
+                        const d = new Date(dob);
+                        return Math.floor((Date.now() - d) / (365.25*24*3600*1000)) + 'y';
+                    }
                     patEl.innerHTML = `<table>
-                        <thead><tr><th>Name</th><th>ABHA</th><th>Risk</th><th>Phone</th><th>Registered</th></tr></thead>
-                        <tbody>${allPats.patients.map(p => `<tr>
-                            <td><strong>${p.name}</strong></td>
+                        <thead><tr><th>Name</th><th>Age/Gender</th><th>ABHA</th><th>Risk</th><th>Phone</th><th>Emergency Contact</th><th>PHC</th></tr></thead>
+                        <tbody>${allPats.patients.map(p => `<tr style="cursor:pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'table-row' : 'none'">
+                            <td><strong>${p.name}</strong><br><span style="font-size:11px;color:var(--text-muted);">Click for details</span></td>
+                            <td>${calcAge(p.date_of_birth)} / ${(p.gender || '—').charAt(0).toUpperCase()}</td>
                             <td style="font-variant-numeric:tabular-nums;">${abhaDisplay(p.abha_number)}</td>
                             <td>${riskBadge(p.risk_level)}</td>
                             <td>${p.phone || '—'}</td>
-                            <td>${timeAgo(p.created_at)}</td>
+                            <td>${p.emergency_contact || '—'}<br><span style="font-size:11px;color:var(--text-muted);">${p.emergency_contact_phone || ''}</span></td>
+                            <td>${p.phc_id || '—'}</td>
+                        </tr>
+                        <tr style="display:none;background:rgba(0,0,0,0.2);">
+                            <td colspan="7" style="padding:16px;">
+                                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;font-size:12px;">
+                                    <div><strong style="color:var(--accent-teal);">Full Name</strong><br>${p.name}</div>
+                                    <div><strong style="color:var(--accent-teal);">Date of Birth</strong><br>${p.date_of_birth || '—'}</div>
+                                    <div><strong style="color:var(--accent-teal);">Gender</strong><br>${p.gender || '—'}</div>
+                                    <div><strong style="color:var(--accent-teal);">ABHA Number</strong><br>${p.abha_number || '—'}</div>
+                                    <div><strong style="color:var(--accent-teal);">Phone</strong><br>${p.phone || '—'}</div>
+                                    <div><strong style="color:var(--accent-teal);">Risk Level</strong><br>${riskBadge(p.risk_level)}</div>
+                                    <div><strong style="color:var(--accent-teal);">Emergency Contact</strong><br>${p.emergency_contact || '—'}</div>
+                                    <div><strong style="color:var(--accent-teal);">Emergency Phone</strong><br>${p.emergency_contact_phone || '—'}</div>
+                                    <div><strong style="color:var(--accent-teal);">PHC</strong><br>${p.phc_id || '—'}</div>
+                                    <div><strong style="color:var(--accent-teal);">Registered</strong><br>${p.created_at ? new Date(p.created_at).toLocaleDateString('en-IN') : '—'}</div>
+                                    <div><strong style="color:var(--accent-teal);">Patient ID</strong><br><span style="font-size:10px;word-break:break-all;">${p.id}</span></div>
+                                </div>
+                            </td>
                         </tr>`).join('')}</tbody>
                     </table>`;
                 }
 
-                // ─── Alert Feed (from patients) ─────────────────────
-                const alerts = allPats.patients
+                // ─── Live Alert Feed (from Telegram + risk levels) ────
+                const liveAlerts = await (await fetch('/dashboard/api/alerts/live')).json();
+                const patientAlerts = allPats.patients
                     .filter(p => p.risk_level === 'EMERGENCY' || p.risk_level === 'HIGH')
                     .map(p => ({
                         level: p.risk_level,
@@ -496,21 +551,26 @@ DASHBOARD_HTML = """
                             ? `🚨 EMERGENCY — ${p.name}`
                             : `⚠️ HIGH RISK — ${p.name}`,
                         detail: p.risk_level === 'EMERGENCY'
-                            ? 'Immediate referral required. Ambulance dispatched.'
-                            : 'Urgent follow-up within 24 hours required.',
-                        time: p.created_at,
+                            ? 'Immediate referral required. Call 108.'
+                            : 'Urgent follow-up within 24 hours.',
                     }));
-                document.getElementById('alert-count').textContent = alerts.length + ' alerts';
+                const telegramAlerts = (liveAlerts.alerts || []).map(a => ({
+                    level: a.risk_level,
+                    title: `📱 ${a.patient_name} — ${a.risk_level}`,
+                    detail: a.message.slice(0, 120),
+                }));
+                const allAlerts = [...patientAlerts, ...telegramAlerts];
+                document.getElementById('alert-count').textContent = allAlerts.length + ' alerts';
                 const feedEl = document.getElementById('alert-feed');
-                if (alerts.length === 0) {
+                if (allAlerts.length === 0) {
                     feedEl.innerHTML = '<div class="empty-state">✅ No active alerts</div>';
                 } else {
-                    feedEl.innerHTML = alerts.map(a => `
+                    feedEl.innerHTML = allAlerts.map(a => `
                         <div class="alert-item">
                             <div class="alert-icon ${a.level.toLowerCase()}">${a.level === 'EMERGENCY' ? '🚨' : '⚠️'}</div>
                             <div>
                                 <div class="alert-title">${a.title}</div>
-                                <div class="alert-detail">${a.detail} · ${timeAgo(a.time)}</div>
+                                <div class="alert-detail">${a.detail}</div>
                             </div>
                         </div>
                     `).join('');
@@ -559,7 +619,7 @@ DASHBOARD_HTML = """
         }
 
         loadDashboard();
-        setInterval(loadDashboard, 10000);
+        setInterval(loadDashboard, 5000);  // Poll every 5s for real-time Telegram updates
     </script>
 </body>
 </html>
