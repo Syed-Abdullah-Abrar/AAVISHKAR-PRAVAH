@@ -23,7 +23,9 @@ import uuid
 import tempfile
 import logging
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+
+IST = timezone(timedelta(hours=5, minutes=30))
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -240,7 +242,7 @@ async def update_dashboard(new_risk: str, transcript: str):
             # Update patient risk
             await db.execute(
                 "UPDATE patients SET risk_level = ?, updated_at = ? WHERE LOWER(name) LIKE '%lakshmi%'",
-                (new_risk.upper(), datetime.now(timezone.utc).isoformat())
+                (new_risk.upper(), datetime.now(IST).isoformat())
             )
             # Log the IVR transcript so dashboard alert feed shows it
             await db.execute("""
@@ -260,7 +262,7 @@ async def save_patient_note(note_type: str, content: str, extra: dict = None):
         "id": str(uuid.uuid4()),
         "type": note_type,
         "content": content,
-        "timestamp": datetime.now(timezone.utc).strftime("%d %b %Y, %H:%M"),
+        "timestamp": datetime.now(IST).strftime("%d %b %Y, %H:%M"),
         "extra": extra or {},
     }
     LAKSHMI_UPLOADS.append(entry)
@@ -506,7 +508,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{emoji} *{label} Recorded!*\n"
             f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             f"✅ *Saved:* _{val}_\n"
-            f"🕐 *Time:* {datetime.now(timezone.utc).strftime('%d %b %Y, %H:%M')} UTC\n\n"
+            f"🕐 *Time:* {datetime.now(IST).strftime('%d %b %Y, %H:%M')} IST\n\n"
             f"Your health record has been updated. Use /my_history or /my_reports to view.\n"
             f"_If you are feeling unwell, please describe your symptoms._",
             parse_mode="Markdown"
@@ -626,7 +628,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{label} *Received & Saved!*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"✅ Your photo has been saved to your health record.\n"
-        f"🕐 *Time:* {datetime.now(timezone.utc).strftime('%d %b %Y, %H:%M')} UTC\n"
+        f"🕐 *Time:* {datetime.now(IST).strftime('%d %b %Y, %H:%M')} IST\n"
         f"📝 *Caption:* _{caption}_\n\n"
         f"_Your ASHA worker Savita Ben and the PHC have been notified._",
         parse_mode="Markdown"
@@ -657,7 +659,7 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"{label} *Received & Saved!*\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         f"✅ *File:* `{fname}` saved to your health record.\n"
-        f"🕐 *Time:* {datetime.now(timezone.utc).strftime('%d %b %Y, %H:%M')} UTC\n"
+        f"🕐 *Time:* {datetime.now(IST).strftime('%d %b %Y, %H:%M')} IST\n"
         f"📝 *Description:* _{caption}_\n\n"
         f"_This has been shared with your PHC records._",
         parse_mode="Markdown"
